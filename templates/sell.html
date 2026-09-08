@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Sell Tickets · {{ event_name }}{% endblock %}
+{% block tagline %}Ticket Desk — {{ username }}{% endblock %}
+{% block wrapclass %} wide{% endblock %}
+
+{% block content %}
+<div class="stats">
+  <div class="stat"><span class="num">{{ total_sold }}</span><span class="label">Sold</span></div>
+  <div class="stat"><span class="num">₦{{ "{:,}".format(total_cash) }}</span><span class="label">Cash In</span></div>
+  <div class="stat"><span class="num">{{ total_used }}</span><span class="label">Checked In</span></div>
+</div>
+
+<div class="card" style="max-width:480px; margin: 22px auto 0;">
+  <h2 style="text-align:center;">Issue a Ticket</h2>
+  <form method="post">
+    <label for="name">Guest Name</label>
+    <input type="text" id="name" name="name" placeholder="e.g. Adaeze Okonkwo" required autofocus>
+
+    <label for="whatsapp">WhatsApp Number</label>
+    <input type="tel" id="whatsapp" name="whatsapp" placeholder="e.g. 08012345678" required>
+
+    <label>Amount</label>
+    <input type="text" value="₦{{ '{:,}'.format(price) }}" disabled>
+
+    <button type="submit">Issue Ticket &amp; Generate QR</button>
+  </form>
+</div>
+
+<div class="toolbar" style="margin-top:34px;">
+  <h3 style="margin:0;">Recently Sold</h3>
+  <div style="display:flex; gap:14px; font-size:14px;">
+    <a href="{{ url_for('scan') }}">Scanner</a>
+    <a href="{{ url_for('all_tickets') }}">All Tickets</a>
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>WhatsApp</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for t in recent %}
+    <tr>
+      <td data-label="ID">{{ t.id }}</td>
+      <td data-label="Name">{{ t.name }}</td>
+      <td data-label="WhatsApp">{{ t.whatsapp }}</td>
+      <td data-label="Status">
+        {% if t.used %}
+          <span class="badge used">Checked In</span>
+        {% else %}
+          <span class="badge valid">Not Yet</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" style="color:var(--muted);">No tickets sold yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
