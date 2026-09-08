@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session, g, flash, Response
-import sqlite3, os, io, csv, secrets, string
+import sqlite3, os, io, csv, secrets, string, re
 from datetime import datetime
 import qrcode
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -97,6 +97,31 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+@app.route("/change_password", methods=["GET", "POST"])
+@login_required()
+def change_password():
+    user = g.user
+    if request.method == "POST":
+        current = request.form.get("current_password", "")
+        new = request.form.get("new_password", "")
+        confirm = request.form.get("confirm_password", "")
+
+        if not check_password_hash(user["password_hash"], current):
+            flash("Current password is incorrect.", "error")
+        elif len(new) < 6:
+            flash("New password must be at least 6 characters.", "error")
+        elif new != confirm:
+            flash("New password and confirmation don't match.", "error")
+        else:
+            db = get_db()
+            db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                       (generate_password_hash(new), user["id"]))
+            db.commit()
+            flash("Password updated.", "success")
+            return redirect(url_for("sell"))
+
+    return render_template("change_password.html", event_name=EVENT_NAME, user=user)
+
 # ------------------ ADMIN ROUTES ------------------
 @app.route("/register", methods=["GET", "POST"])
 @login_required(role="admin")
@@ -122,7 +147,7 @@ def report():
     db = get_db()
     sales = db.execute("""
         SELECT u.username, u.role, COUNT(t.id) as tickets_sold,
-               COALESCE(SUM(?), 0) as total_cash
+               COUNT(t.id) * ? as total_cash
         FROM users u
         LEFT JOIN tickets t ON u.id = t.sold_by
         GROUP BY u.id
@@ -205,23 +230,53 @@ def ticket_issued(ticket_id):
                            qr_exists=True,
                            user=g.user)
 
+def normalize_phone(raw):
+    """Keep only digits, and compare on the last 10 (drops leading 0 / +234 / country code differences)."""
+    digits = re.sub(r"\D", "", raw or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
 @app.route("/check_ticket", methods=["POST"])
 @login_required()
 def check_ticket():
-    data = request.form.get("data", "").strip()
+    raw = request.form.get("data", "").strip()
     db = get_db()
-    if "/ticket/" in data: data = data.split("/ticket/")[1]
-    if "/api/verify/" in data: data = data.split("/api/verify/")[1]
-    if not data.isdigit():
-        return {"status": "INVALID", "msg": "Ticket ID must be a number"}
-    ticket_id = int(data)
-    ticket = db.execute("SELECT * FROM tickets WHERE id =?", (ticket_id,)).fetchone()
+
+    lookup = raw
+    if "://" in lookup:  # a full URL was scanned instead of a bare ID
+        lookup = lookup.rstrip("/").rsplit("/", 1)[-1]
+
+    ticket = None
+
+    # 1) Try as a numeric ticket ID first
+    if lookup.isdigit():
+        ticket = db.execute("SELECT * FROM tickets WHERE id = ?", (int(lookup),)).fetchone()
+
+    # 2) Fall back to a phone-number lookup if no ID match
     if not ticket:
-        return {"status": "INVALID", "msg": f"Ticket #{ticket_id} not found"}
+        target = normalize_phone(raw)
+        if len(target) >= 7:  # avoid matching on tiny/garbage input
+            all_tickets = db.execute("SELECT * FROM tickets").fetchall()
+            matches = [t for t in all_tickets if normalize_phone(t["whatsapp"]) == target]
+            if len(matches) == 1:
+                ticket = matches[0]
+            elif len(matches) > 1:
+                return {
+                    "status": "MULTIPLE",
+                    "msg": f"{len(matches)} tickets are registered to this number — pick the guest.",
+                    "matches": [
+                        {"id": t["id"], "name": t["name"], "used": bool(t["used"])} for t in matches
+                    ],
+                }
+
+    if not ticket:
+        return {"status": "INVALID", "msg": f"No ticket found for \"{raw}\""}
+
     if ticket["used"]:
         return {"status": "ALREADY USED", "msg": f"Already scanned at {ticket['used_at']}", "name": ticket["name"], "whatsapp": ticket["whatsapp"]}
+
     used_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    db.execute("UPDATE tickets SET used = 1, used_at =? WHERE id =?", (used_time, ticket_id))
+    db.execute("UPDATE tickets SET used = 1, used_at =? WHERE id =?", (used_time, ticket["id"]))
     db.commit()
     return {"status": "VALID", "msg": "Entry Approved", "name": ticket["name"], "whatsapp": ticket["whatsapp"]}
 
