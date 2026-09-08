@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, flash, g
 import os
 import sqlite3
 import uuid
@@ -6,18 +6,17 @@ import csv
 import io
 from datetime import datetime
 from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash # NEW
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG — edit these for your event
 # ─────────────────────────────────────────────────────────────
 EVENT_NAME = "BE Owambe Experience and Award Ceremony"
 TICKET_PRICE = 3500  # naira
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "password")  # change this before going live!
+# ADMIN_USERNAME and PASSWORD are now in DB. Set first admin below
 
 # ─────────────────────────────────────────────────────────────
-# APP SETUP — all paths are relative to this file, so the app
-# runs the same on PythonAnywhere, locally, or anywhere else.
+# APP SETUP
 # ─────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
@@ -33,8 +32,108 @@ try:
 except ImportError:
     QR_ENABLED = False
 
-
 def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect(DB_PATH)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+@app.teardown_appcontext
+def close_db(e=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+def init_db():
+    conn = get_db()
+    # 1. NEW USERS TABLE
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'seller' -- 'admin' or 'seller'
+        )
+    """)
+    
+    # 2. UPDATE TICKETS TABLE - add sold_by
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            whatsapp TEXT NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0,
+            used INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            used_at TEXT,
+            sold_by INTEGER, -- NEW
+            FOREIGN KEY(sold_by) REFERENCES users(id)
+        )
+    """)
+    
+    # 3. Create default admin if no users exist
+    user = conn.execute("SELECT * FROM users WHERE username = ?", ('admin',)).fetchone()
+    if not user:
+        hashed = generate_password_hash("admin123") # CHANGE THIS AFTER FIRST LOGIN
+        conn.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                     ('admin', hashed, 'admin'))
+        flash("Default admin created: username=admin, password=admin123. Please change it!", "warning")
+        
+    conn.commit()
+
+init_db()
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.get('user') is None:
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.get('user') is None or g.user['role'] != 'admin':
+            flash("You must be an admin to access this page.", "error")
+            return redirect(url_for("sell"))
+        return view(*args, **kwargs)
+    return wrapped
+
+@app.before_request
+def load_logged_in_user():
+    user_id = session.get('user_id')
+    if user_id is None:
+        g.user = None
+    else:
+        g.user = get_db().execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+
+# ─────────────────────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/")
+def home():
+    if g.user:
+        return redirect(url_for("sell"))
+    return redirect(url_for("login"))
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if g.user:
+        return redirect(url_for("sell"))
+
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        user = get_db().execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+
+        if user is None or not check_password_hash(user['password_hash'], password):
+            error = "Wrong username or password."
+        else:
+            session.clear()
+            sessiondef get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
