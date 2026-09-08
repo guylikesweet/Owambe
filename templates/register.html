@@ -1,34 +1,20 @@
-<!doctype html>
-<html>
-<head>
-  <title>Add Seller - {{ event_name }}</title>
-  <style>
-    body{font-family:sans-serif; max-width:500px; margin:40px auto; padding:20px;}
-    input, select, button{width:100%; padding:10px; margin:8px 0;}
-    button{background:#28a745; color:white; border:none; cursor:pointer;}
-  </style>
-</head>
-<body>
-  <h2>Add New Seller</h2>
-  <p>Only admins can access this page</p>
-  
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-        <p style="color:{% if category=='error' %}red{% else %}green{% endif %}">{{ message }}</p>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
+{% extends "base.html" %}
+{% block title %}Add Seller · {{ event_name }}{% endblock %}
+{% block tagline %}Add New Seller — admin only{% endblock %}
 
-  <form method="POST">
-    <label>Username</label>
-    <input type="text" name="username" required placeholder="e.g. john">
+{% block content %}
+<div class="card">
+  <h2 style="text-align:center;">Add New Seller</h2>
 
-    <label>Password</label>
-    <input type="password" name="password" required placeholder="Set a password">
+  <form method="post">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" required placeholder="e.g. john">
 
-    <label>Role</label>
-    <select name="role">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required placeholder="Set a password">
+
+    <label for="role">Role</label>
+    <select id="role" name="role">
       <option value="seller">Seller</option>
       <option value="admin">Admin</option>
     </select>
@@ -36,6 +22,6 @@
     <button type="submit">Create User</button>
   </form>
 
-  <p><a href="{{ url_for('report') }}">← Back to Report</a></p>
-</body>
-</html>
+  <a href="{{ url_for('report') }}" class="btn secondary" style="margin-top:12px;">Back to Report</a>
+</div>
+{% endblock %}

@@ -7,18 +7,8 @@
   <h2 style="text-align:center; margin-bottom: 4px;">Sign in</h2>
   <p style="text-align:center; color:var(--muted); font-size:14px; margin:0;">Ticket desk access only</p>
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-        <div class="{{ category }}-msg" style="padding:10px; margin:10px 0; border-radius:4px; background:{% if category=='error' %}#f8d7da{% else %}#d4edda{% endif %};">
-          {{ message }}
-        </div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
-
   {% if error %}
-    <div class="error-msg" style="padding:10px; margin:10px 0; border-radius:4px; background:#f8d7da;">{{ error }}</div>
+    <div class="error-msg">{{ error }}</div>
   {% endif %}
 
   <form method="post">

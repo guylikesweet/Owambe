@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Sell Tickets · {{ event_name }}{% endblock %}
-{% block tagline %}Ticket Desk — {{ user.username }} ({{ user.role }}){% endblock %}  {# 1. CHANGED #}
+{% block tagline %}Ticket Desk — {{ user.username }} ({{ user.role }}){% endblock %}
 {% block wrapclass %} wide{% endblock %}
 
 {% block content %}
@@ -9,16 +9,6 @@
   <div class="stat"><span class="num">₦{{ "{:,}".format(total_cash) }}</span><span class="label">Cash In</span></div>
   <div class="stat"><span class="num">{{ total_used }}</span><span class="label">Checked In</span></div>
 </div>
-
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-    {% for category, message in messages %}
-      <div style="padding:10px; margin:10px 0; border-radius:4px; background:{% if category=='error' %}#f8d7da{% else %}#d4edda{% endif %};">
-        {{ message }}
-      </div>
-    {% endfor %}
-  {% endif %}
-{% endwith %}
 
 <div class="card" style="max-width:480px; margin: 22px auto 0;">
   <h2 style="text-align:center;">Issue a Ticket</h2>
@@ -41,9 +31,10 @@
   <div style="display:flex; gap:14px; font-size:14px;">
     <a href="{{ url_for('scan') }}">Scanner</a>
     <a href="{{ url_for('all_tickets') }}">All Tickets</a>
-    {% if user.role == 'admin' %}  {# 2. NEW #}
+    {% if user.role == 'admin' %}
       <a href="{{ url_for('report') }}">Report</a>
     {% endif %}
+    <a href="{{ url_for('change_password') }}">Change Password</a>
     <a href="{{ url_for('logout') }}">Logout</a>
   </div>
 </div>
@@ -51,20 +42,21 @@
 <table>
   <thead>
     <tr>
-      <th>Ticket Code</th>  <!-- CHANGED: was ID -->
+      <th>ID</th>
       <th>Name</th>
       <th>WhatsApp</th>
-      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}  {# 3. NEW #}
+      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}
       <th>Status</th>
+      <th>QR</th>
     </tr>
   </thead>
   <tbody>
     {% for t in recent %}
     <tr>
-      <td data-label="Ticket Code"><b>{{ t.ticket_code }}</b></td> <!-- CHANGED: was t.id -->
+      <td data-label="ID">{{ t.id }}</td>
       <td data-label="Name">{{ t.name }}</td>
       <td data-label="WhatsApp">{{ t.whatsapp }}</td>
-      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}  {# 3. NEW #}
+      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}
       <td data-label="Status">
         {% if t.used %}
           <span class="badge used">Checked In</span>
@@ -72,9 +64,12 @@
           <span class="badge valid">Not Yet</span>
         {% endif %}
       </td>
+      <td data-label="QR">
+        <a href="{{ url_for('qr_image', ticket_id=t.id) }}" download="owambe_ticket_{{ t.id }}.png">Download</a>
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="{% if user.role == 'admin' %}5{% else %}4{% endif %}" style="color:var(--muted);">No tickets sold yet.</td></tr>  {# updated colspan #}
+    <tr><td colspan="{% if user.role == 'admin' %}6{% else %}5{% endif %}" style="color:var(--muted);">No tickets sold yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -17,7 +17,8 @@
   <div class="qr-box">
     <img src="{{ url_for('qr_image', ticket_id=ticket.id) }}" width="200" height="200" alt="Ticket QR code">
   </div>
-  <p style="text-align:center; color:var(--muted); font-size:13px;">Send this QR code to the guest on WhatsApp — it's their entry pass.</p>
+  <a href="{{ url_for('qr_image', ticket_id=ticket.id) }}" download="owambe_ticket_{{ ticket.id }}.png" class="btn secondary">Download QR Code</a>
+  <p style="text-align:center; color:var(--muted); font-size:13px;">Send this QR code to the guest on WhatsApp — it's their entry pass. You can come back to <a href="{{ url_for('all_tickets') }}">All Tickets</a> any time to download it again.</p>
   {% else %}
   <p style="text-align:center; color:var(--muted); font-size:13px;">QR code generation isn't available; the ticket ID itself can still be checked at the door.</p>
   {% endif %}

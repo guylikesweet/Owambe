@@ -15,9 +15,10 @@
     <a href="{{ url_for('export_csv') }}">Export CSV</a>
     <a href="{{ url_for('sell') }}">Ticket Desk</a>
     <a href="{{ url_for('scan') }}">Scanner</a>
-    {% if user.role == 'admin' %}  {# NEW #}
+    {% if user.role == 'admin' %}
       <a href="{{ url_for('report') }}">Report</a>
     {% endif %}
+    <a href="{{ url_for('change_password') }}">Change Password</a>
   </div>
 </div>
 
@@ -27,9 +28,10 @@
       <th>ID</th>
       <th>Name</th>
       <th>WhatsApp</th>
-      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}  {# NEW #}
+      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}
       <th>Sold</th>
       <th>Status</th>
+      <th>QR</th>
     </tr>
   </thead>
   <tbody>
@@ -38,7 +40,7 @@
       <td data-label="ID">{{ t.id }}</td>
       <td data-label="Name">{{ t.name }}</td>
       <td data-label="WhatsApp">{{ t.whatsapp }}</td>
-      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}  {# NEW #}
+      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}
       <td data-label="Sold">{{ t.created_at }}</td>
       <td data-label="Status">
         {% if t.used %}
@@ -47,9 +49,12 @@
           <span class="badge valid">Not Yet</span>
         {% endif %}
       </td>
+      <td data-label="QR">
+        <a href="{{ url_for('qr_image', ticket_id=t.id) }}" download="owambe_ticket_{{ t.id }}.png">Download</a>
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="{% if user.role == 'admin' %}6{% else %}5{% endif %}" style="color:var(--muted);">No tickets match.</td></tr>  {# updated colspan #}
+    <tr><td colspan="{% if user.role == 'admin' %}7{% else %}6{% endif %}" style="color:var(--muted);">No tickets match.</td></tr>
     {% endfor %}
   </tbody>
 </table>

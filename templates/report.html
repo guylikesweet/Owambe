@@ -1,61 +1,51 @@
-<!doctype html>
-<html>
-<head>
-  <title>Sales Report - {{ event_name }}</title>
-  <style>
-    body{font-family:sans-serif; max-width:900px; margin:40px auto; padding:20px;}
-    table{width:100%; border-collapse:collapse; margin-top:20px;}
-    th, td{border:1px solid #ddd; padding:10px; text-align:left;}
-    th{background:#f2f2f2;}
-    .btn{display:inline-block; padding:10px 15px; background:#007bff; color:white; text-decoration:none; border-radius:4px; margin-bottom:15px;}
-    .nav{margin-bottom:20px;}
-    .nav a{margin-right:15px;}
-  </style>
-</head>
-<body>
-  <div class="nav">
-    <a href="{{ url_for('sell') }}">Sell</a>
+{% extends "base.html" %}
+{% block title %}Sales Report · {{ event_name }}{% endblock %}
+{% block tagline %}Sales Report — admin only{% endblock %}
+{% block wrapclass %} wide{% endblock %}
+
+{% block content %}
+<div class="toolbar" style="margin-bottom:14px;">
+  <a href="{{ url_for('register') }}" class="btn" style="width:auto; margin-top:0;">+ Add New Seller</a>
+  <div style="display:flex; gap:14px; font-size:14px;">
+    <a href="{{ url_for('sell') }}">Ticket Desk</a>
     <a href="{{ url_for('all_tickets') }}">All Tickets</a>
-    <a href="{{ url_for('scan') }}">Scan</a>
+    <a href="{{ url_for('scan') }}">Scanner</a>
+    <a href="{{ url_for('change_password') }}">Change Password</a>
     <a href="{{ url_for('logout') }}">Logout</a>
   </div>
+</div>
 
-  <h2>Sales Report</h2>
-  <a href="{{ url_for('register') }}" class="btn">+ Add New Seller</a>
-  
-  <table>
-    <thead>
-      <tr>
-        <th>Seller</th>
-        <th>Role</th>
-        <th>Tickets Sold</th>
-        <th>Total Cash</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for s in sales %}
-      <tr>
-        <td>{{ s.username }}</td>
-        <td>{{ s.role }}</td>
-        <td>{{ s.tickets_sold }}</td>
-        <td>₦{{ "{:,}".format(s.total_cash) }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="4">No sales yet</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<h3>Sales by Seller</h3>
+<table>
+  <thead>
+    <tr><th>Seller</th><th>Role</th><th>Tickets Sold</th><th>Total Cash</th></tr>
+  </thead>
+  <tbody>
+    {% for s in sales %}
+    <tr>
+      <td data-label="Seller">{{ s.username }}</td>
+      <td data-label="Role">{{ s.role }}</td>
+      <td data-label="Tickets Sold">{{ s.tickets_sold }}</td>
+      <td data-label="Total Cash">₦{{ "{:,}".format(s.total_cash) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" style="color:var(--muted);">No sales yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
 
-  <h3 style="margin-top:40px;">All Users</h3>
-  <table>
-    <thead>
-      <tr><th>Username</th><th>Role</th></tr>
-    </thead>
-    <tbody>
-      {% for u in users %}
-      <tr><td>{{ u.username }}</td><td>{{ u.role }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</body>
-</html>
+<h3 style="margin-top:34px;">All Users</h3>
+<table>
+  <thead>
+    <tr><th>Username</th><th>Role</th></tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td data-label="Username">{{ u.username }}</td>
+      <td data-label="Role">{{ u.role }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
