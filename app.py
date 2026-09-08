@@ -19,7 +19,7 @@ def get_db():
 
 def init_db():
     db = get_db()
-    # Tickets table now has sold_by
+    # Tickets table with sold_by
     db.execute("""
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,8 +49,8 @@ def init_db():
         print("Default admin created: admin / admin123")
     db.commit()
 
-@app.before_first_request
-def setup():
+# Run DB init on startup for Flask 3.x
+with app.app_context():
     init_db()
 
 def current_user():
@@ -113,7 +113,7 @@ def register():
             return redirect(url_for("report"))
         except sqlite3.IntegrityError:
             flash("Username already exists", "error")
-    return render_template("register.html", event_name=EVENT_NAME)
+    return render_template("register.html", event_name=EVENT_NAME, user=g.user)
 
 @app.route("/report")
 @login_required(role="admin")
@@ -129,7 +129,7 @@ def report():
     """, (TICKET_PRICE,)).fetchall()
 
     users = db.execute("SELECT * FROM users ORDER BY role, username").fetchall()
-    return render_template("report.html", sales=sales, users=users, event_name=EVENT_NAME)
+    return render_template("report.html", sales=sales, users=users, event_name=EVENT_NAME, user=g.user)
 
 # ------------------ MAIN APP ROUTES ------------------
 @app.route("/", methods=["GET", "POST"])
@@ -142,8 +142,8 @@ def sell():
         name = request.form["name"]
         whatsapp = request.form["whatsapp"]
         created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        db.execute("INSERT INTO tickets (name, whatsapp, created_at, sold_by) VALUES (?,?,?)",
-                   (name, whatsapp, created, user["id"]))
+        db.execute("INSERT INTO tickets (name, whatsapp, created_at, sold_by) VALUES (?,?,?,?)",
+                   (name, whatsapp, created, user["id"])) # FIXED: 4 question marks
         db.commit()
         flash(f"Ticket issued for {name}", "success")
         return redirect(url_for("sell"))
@@ -167,7 +167,7 @@ def sell():
         """, (user["id"],)).fetchall()
 
     return render_template("sell.html",
-        total_sold=stats[0], total_cash=stats[1], total_used=stats[2],
+        total_sold=stats[0] or 0, total_cash=stats[1] or 0, total_used=stats[2] or 0,
         recent=recent, price=TICKET_PRICE, event_name=EVENT_NAME, user=user)
 
 @app.route("/tickets")
@@ -199,7 +199,7 @@ def all_tickets():
 @app.route("/scan")
 @login_required()
 def scan():
-    return render_template("scan.html", event_name=EVENT_NAME)
+    return render_template("scan.html", event_name=EVENT_NAME, user=g.user)
 
 @app.route("/api/verify/<int:ticket_id>")
 @login_required()
@@ -222,7 +222,7 @@ def ticket(ticket_id):
     ticket = db.execute("SELECT * FROM tickets WHERE id =?", (ticket_id,)).fetchone()
     if not ticket:
         return "Ticket not found", 404
-    qr = qrcode.make(f"https://yourdomain.com/api/verify/{ticket_id}")
+    qr = qrcode.make(f"{request.host_url}api/verify/{ticket_id}") # FIXED: uses your domain automatically
     buf = io.BytesIO()
     qr.save(buf, format="PNG")
     buf.seek(0)
