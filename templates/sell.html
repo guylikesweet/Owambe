@@ -24,10 +24,39 @@
   <h2 style="text-align:center;">Issue a Ticket</h2>
   <form method="post">
     <label for="name">Guest Name</label>
-    <input type="text" id="name" name="name" placeholder="e.g. Adaeze Okonkwo"
+    <input type="text" id="name" name="name" placeholder="e.g. Adaeze Okonkwo" required autofocus>
+
+    <label for="whatsapp">WhatsApp Number</label>
+    <input type="tel" id="whatsapp" name="whatsapp" placeholder="e.g. 08012345678" required>
+
+    <label>Amount</label>
+    <input type="text" value="₦{{ '{:,}'.format(price) }}" disabled>
+
+    <button type="submit">Issue Ticket &amp; Generate QR</button>
+  </form>
+</div>
+
+<div class="toolbar" style="margin-top:34px;">
+  <h3 style="margin:0;">Recently Sold</h3>
+  <div style="display:flex; gap:14px; font-size:14px;">
+    <a href="{{ url_for('scan') }}">Scanner</a>
+    <a href="{{ url_for('all_tickets') }}">All Tickets</a>
+    {% if user.role == 'admin' %}  {# 2. NEW #}
+      <a href="{{ url_for('report') }}">Report</a>
+    {% endif %}
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</div>
+
 <table>
   <thead>
-    <tr><th>ID</th><th>Name</th><th>WhatsApp</th><th>Status</th></tr>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>WhatsApp</th>
+      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}  {# 3. NEW #}
+      <th>Status</th>
+    </tr>
   </thead>
   <tbody>
     {% for t in recent %}
@@ -35,6 +64,7 @@
       <td data-label="ID">{{ t.id }}</td>
       <td data-label="Name">{{ t.name }}</td>
       <td data-label="WhatsApp">{{ t.whatsapp }}</td>
+      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}  {# 3. NEW #}
       <td data-label="Status">
         {% if t.used %}
           <span class="badge used">Checked In</span>
@@ -44,7 +74,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="4" style="color:var(--muted);">No tickets sold yet.</td></tr>
+    <tr><td colspan="{% if user.role == 'admin' %}5{% else %}4{% endif %}" style="color:var(--muted);">No tickets sold yet.</td></tr>  {# updated colspan #}
     {% endfor %}
   </tbody>
 </table>
