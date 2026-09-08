@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Ticket Issued · {{ event_name }}{% endblock %}
+{% block tagline %}Ticket Issued{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2 style="text-align:center;">✅ Ticket Issued</h2>
+
+  <div class="ticket-details">
+    <div class="field"><span class="k">Ticket ID</span><div class="v">{{ ticket.id }}</div></div>
+    <div class="field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
+    <div class="field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
+    <div class="field"><span class="k">Amount Paid</span><div class="v">₦{{ '{:,}'.format(price) }}</div></div>
+  </div>
+
+  {% if qr_exists %}
+  <div class="qr-box">
+    <img src="{{ url_for('static', filename='qr/' + ticket.id + '.png') }}" width="200" height="200" alt="Ticket QR code">
+  </div>
+  <p style="text-align:center; color:var(--muted); font-size:13px;">Send this QR code to the guest on WhatsApp — it's their entry pass.</p>
+  {% else %}
+  <p style="text-align:center; color:var(--muted); font-size:13px;">QR code generation isn't available; the ticket ID itself can still be checked at the door.</p>
+  {% endif %}
+
+  <a href="{{ url_for('sell') }}" class="btn" style="margin-top:22px;">Sell Another Ticket</a>
+  <a href="{{ url_for('scan') }}" class="btn secondary">Go to Scanner</a>
+</div>
+{% endblock %}
