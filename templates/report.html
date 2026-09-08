@@ -15,4 +15,47 @@
 <body>
   <div class="nav">
     <a href="{{ url_for('sell') }}">Sell</a>
-    <a href="{{ url_for('all_tickets') }}">
+    <a href="{{ url_for('all_tickets') }}">All Tickets</a>
+    <a href="{{ url_for('scan') }}">Scan</a>
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </div>
+
+  <h2>Sales Report</h2>
+  <a href="{{ url_for('register') }}" class="btn">+ Add New Seller</a>
+  
+  <table>
+    <thead>
+      <tr>
+        <th>Seller</th>
+        <th>Role</th>
+        <th>Tickets Sold</th>
+        <th>Total Cash</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sales %}
+      <tr>
+        <td>{{ s.username }}</td>
+        <td>{{ s.role }}</td>
+        <td>{{ s.tickets_sold }}</td>
+        <td>₦{{ "{:,}".format(s.total_cash) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No sales yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:40px;">All Users</h3>
+  <table>
+    <thead>
+      <tr><th>Username</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr><td>{{ u.username }}</td><td>{{ u.role }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
