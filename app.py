@@ -1,365 +1,249 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, flash, g
-import os
-import sqlite3
-import uuid
-import csv
-import io
+from flask import Flask, render_template, request, redirect, url_for, session, g, flash, Response
+import sqlite3, os, io, csv
 from datetime import datetime
-from functools import wraps
-from werkzeug.security import generate_password_hash, check_password_hash # NEW
+import qrcode
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# ─────────────────────────────────────────────────────────────
-# CONFIG — edit these for your event
-# ─────────────────────────────────────────────────────────────
-EVENT_NAME = "BE Owambe Experience and Award Ceremony"
-TICKET_PRICE = 3500  # naira
-# ADMIN_USERNAME and PASSWORD are now in DB. Set first admin below
-
-# ─────────────────────────────────────────────────────────────
-# APP SETUP
-# ─────────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "be-owambe-" + uuid.uuid4().hex)
+app.secret_key = os.environ.get("SECRET_KEY", "change-this-in-render")
 
-DB_PATH = os.path.join(BASE_DIR, "tickets.db")
-QR_DIR = os.path.join(BASE_DIR, "static", "qr")
-os.makedirs(QR_DIR, exist_ok=True)
+DATABASE = "tickets.db"
+EVENT_NAME = "BE Owambe"
+TICKET_PRICE = 3500
 
-try:
-    import qrcode
-    QR_ENABLED = True
-except ImportError:
-    QR_ENABLED = False
-
+# ------------------ DB HELPERS ------------------
 def get_db():
-    if 'db' not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-    return g.db
-
-@app.teardown_appcontext
-def close_db(e=None):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
-    conn = get_db()
-    # 1. NEW USERS TABLE
-    conn.execute("""
+    db = get_db()
+    # Tickets table now has sold_by
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            whatsapp TEXT NOT NULL,
+            used INTEGER DEFAULT 0,
+            created_at TEXT,
+            used_at TEXT,
+            sold_by INTEGER,
+            FOREIGN KEY (sold_by) REFERENCES users (id)
+        )
+    """)
+    # Users table
+    db.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'seller' -- 'admin' or 'seller'
+            role TEXT DEFAULT 'seller'
         )
     """)
-    
-    # 2. UPDATE TICKETS TABLE - add sold_by
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tickets (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            whatsapp TEXT NOT NULL,
-            amount INTEGER NOT NULL DEFAULT 0,
-            used INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            used_at TEXT,
-            sold_by INTEGER, -- NEW
-            FOREIGN KEY(sold_by) REFERENCES users(id)
-        )
-    """)
-    
-    # 3. Create default admin if no users exist
-    user = conn.execute("SELECT * FROM users WHERE username = ?", ('admin',)).fetchone()
+    # Create default admin if no users exist
+    user = db.execute("SELECT * FROM users").fetchone()
     if not user:
-        hashed = generate_password_hash("admin123") # CHANGE THIS AFTER FIRST LOGIN
-        conn.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                     ('admin', hashed, 'admin'))
-        flash("Default admin created: username=admin, password=admin123. Please change it!", "warning")
-        
-    conn.commit()
+        db.execute("INSERT INTO users (username, password_hash, role) VALUES (?,?,?)",
+                   ("admin", generate_password_hash("admin123"), "admin"))
+        print("Default admin created: admin / admin123")
+    db.commit()
 
-init_db()
+@app.before_first_request
+def setup():
+    init_db()
 
-def login_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if g.get('user') is None:
-            return redirect(url_for("login"))
-        return view(*args, **kwargs)
-    return wrapped
+def current_user():
+    if "user_id" not in session:
+        return None
+    db = get_db()
+    return db.execute("SELECT * FROM users WHERE id =?", (session["user_id"],)).fetchone()
 
-def admin_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if g.get('user') is None or g.user['role'] != 'admin':
-            flash("You must be an admin to access this page.", "error")
-            return redirect(url_for("sell"))
-        return view(*args, **kwargs)
-    return wrapped
+def login_required(role=None):
+    def decorator(f):
+        def wrapper(*args, **kwargs):
+            user = current_user()
+            if not user:
+                return redirect(url_for("login"))
+            if role and user["role"]!= role:
+                flash("You don't have permission for that page", "error")
+                return redirect(url_for("sell"))
+            g.user = user
+            return f(*args, **kwargs)
+        wrapper.__name__ = f.__name__
+        return wrapper
+    return decorator
 
-@app.before_request
-def load_logged_in_user():
-    user_id = session.get('user_id')
-    if user_id is None:
-        g.user = None
-    else:
-        g.user = get_db().execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
-
-# ─────────────────────────────────────────────────────────────
-# ROUTES
-# ─────────────────────────────────────────────────────────────
-
-@app.route("/")
-def home():
-    if g.user:
-        return redirect(url_for("sell"))
-    return redirect(url_for("login"))
-
+# ------------------ AUTH ROUTES ------------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if g.user:
-        return redirect(url_for("sell"))
-
-    error = None
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-        user = get_db().execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        username = request.form["username"]
+        password = request.form["password"]
+        db = get_db()
+        user = db.execute("SELECT * FROM users WHERE username =?", (username,)).fetchone()
 
-        if user is None or not check_password_hash(user['password_hash'], password):
-            error = "Wrong username or password."
+        if user and check_password_hash(user["password_hash"], password):
+            session["user_id"] = user["id"]
+            return redirect(url_for("sell"))
         else:
-            session.clear()
-            sessiondef get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    conn = get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tickets (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            whatsapp TEXT NOT NULL,
-            amount INTEGER NOT NULL DEFAULT 0,
-            used INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            used_at TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-init_db()
-
-
-def login_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("login"))
-        return view(*args, **kwargs)
-    return wrapped
-
-
-# ─────────────────────────────────────────────────────────────
-# ROUTES
-# ─────────────────────────────────────────────────────────────
-
-@app.route("/")
-def home():
-    if session.get("logged_in"):
-        return redirect(url_for("sell"))
-    return redirect(url_for("login"))
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if session.get("logged_in"):
-        return redirect(url_for("sell"))
-
-    error = None
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            session["logged_in"] = True
-            session["username"] = username
-            return redirect(url_for("sell"))
-        error = "Wrong username or password."
-
-    return render_template("login.html", event_name=EVENT_NAME, error=error)
-
+            error = "Invalid username or password"
+            return render_template("login.html", error=error)
+    return render_template("login.html")
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
+# ------------------ ADMIN ROUTES ------------------
+@app.route("/register", methods=["GET", "POST"])
+@login_required(role="admin")
+def register():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+        role = request.form["role"]
+        db = get_db()
+        try:
+            db.execute("INSERT INTO users (username, password_hash, role) VALUES (?,?,?)",
+                       (username, generate_password_hash(password), role))
+            db.commit()
+            flash(f"User {username} created successfully", "success")
+            return redirect(url_for("report"))
+        except sqlite3.IntegrityError:
+            flash("Username already exists", "error")
+    return render_template("register.html", event_name=EVENT_NAME)
 
-@app.route("/sell", methods=["GET", "POST"])
-@login_required
+@app.route("/report")
+@login_required(role="admin")
+def report():
+    db = get_db()
+    sales = db.execute("""
+        SELECT u.username, u.role, COUNT(t.id) as tickets_sold,
+               COALESCE(SUM(?), 0) as total_cash
+        FROM users u
+        LEFT JOIN tickets t ON u.id = t.sold_by
+        GROUP BY u.id
+        ORDER BY total_cash DESC
+    """, (TICKET_PRICE,)).fetchall()
+
+    users = db.execute("SELECT * FROM users ORDER BY role, username").fetchall()
+    return render_template("report.html", sales=sales, users=users, event_name=EVENT_NAME)
+
+# ------------------ MAIN APP ROUTES ------------------
+@app.route("/", methods=["GET", "POST"])
+@login_required()
 def sell():
-    conn = get_db()
+    db = get_db()
+    user = g.user
 
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        whatsapp = request.form.get("whatsapp", "").strip()
-
-        if not name or not whatsapp:
-            flash("Name and WhatsApp number are both required.", "error")
-            return redirect(url_for("sell"))
-
-        ticket_id = uuid.uuid4().hex[:8].upper()
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        conn.execute(
-            "INSERT INTO tickets (id, name, whatsapp, amount, used, created_at) VALUES (?,?,?,?,0,?)",
-            (ticket_id, name, whatsapp, TICKET_PRICE, created_at),
-        )
-        conn.commit()
-
-        if QR_ENABLED:
-            verify_url = request.url_root.rstrip("/") + url_for("view_ticket", ticket_id=ticket_id)
-            img = qrcode.make(verify_url)
-            img.save(os.path.join(QR_DIR, f"{ticket_id}.png"))
-
-        conn.close()
-        return redirect(url_for("issued", ticket_id=ticket_id))
-
-    total_sold = conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
-    total_cash = conn.execute("SELECT COALESCE(SUM(amount),0) FROM tickets").fetchone()[0]
-    total_used = conn.execute("SELECT COUNT(*) FROM tickets WHERE used=1").fetchone()[0]
-    recent = conn.execute(
-        "SELECT * FROM tickets ORDER BY created_at DESC LIMIT 8"
-    ).fetchall()
-    conn.close()
-
-    return render_template(
-        "sell.html",
-        event_name=EVENT_NAME,
-        price=TICKET_PRICE,
-        username=session.get("username"),
-        total_sold=total_sold,
-        total_cash=total_cash,
-        total_used=total_used,
-        recent=recent,
-    )
-
-
-@app.route("/issued/<ticket_id>")
-@login_required
-def issued(ticket_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
-    conn.close()
-    if not row:
+        name = request.form["name"]
+        whatsapp = request.form["whatsapp"]
+        created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute("INSERT INTO tickets (name, whatsapp, created_at, sold_by) VALUES (?,?,?)",
+                   (name, whatsapp, created, user["id"]))
+        db.commit()
+        flash(f"Ticket issued for {name}", "success")
         return redirect(url_for("sell"))
 
-    qr_exists = QR_ENABLED and os.path.exists(os.path.join(QR_DIR, f"{ticket_id}.png"))
-    return render_template(
-        "ticket_issued.html",
-        event_name=EVENT_NAME,
-        price=TICKET_PRICE,
-        ticket=row,
-        qr_exists=qr_exists,
-    )
+    # Stats: different for admin vs seller
+    if user["role"] == "admin":
+        stats = db.execute("SELECT COUNT(*), COALESCE(SUM(?),0), SUM(used) FROM tickets", (TICKET_PRICE,)).fetchone()
+        recent = db.execute("""
+            SELECT t.*, u.username FROM tickets t
+            LEFT JOIN users u ON t.sold_by = u.id
+            ORDER BY t.id DESC LIMIT 10
+        """).fetchall()
+    else:
+        stats = db.execute("SELECT COUNT(*), COALESCE(SUM(?),0), SUM(used) FROM tickets WHERE sold_by =?",
+                           (TICKET_PRICE, user["id"])).fetchone()
+        recent = db.execute("""
+            SELECT t.*, u.username FROM tickets t
+            LEFT JOIN users u ON t.sold_by = u.id
+            WHERE t.sold_by =?
+            ORDER BY t.id DESC LIMIT 10
+        """, (user["id"],)).fetchall()
 
+    return render_template("sell.html",
+        total_sold=stats[0], total_cash=stats[1], total_used=stats[2],
+        recent=recent, price=TICKET_PRICE, event_name=EVENT_NAME, user=user)
 
 @app.route("/tickets")
-@login_required
+@login_required()
 def all_tickets():
-    q = request.args.get("q", "").strip()
-    conn = get_db()
-    if q:
-        rows = conn.execute(
-            "SELECT * FROM tickets WHERE name LIKE ? OR whatsapp LIKE ? OR id LIKE ? ORDER BY created_at DESC",
-            (f"%{q}%", f"%{q}%", f"%{q}%"),
-        ).fetchall()
+    db = get_db()
+    user = g.user
+    q = request.args.get("q", "")
+
+    if user["role"] == "admin":
+        sql = """
+            SELECT t.*, u.username FROM tickets t
+            LEFT JOIN users u ON t.sold_by = u.id
+            WHERE t.name LIKE? OR t.whatsapp LIKE? OR t.id LIKE?
+            ORDER BY t.id DESC
+        """
+        tickets = db.execute(sql, (f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM tickets ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return render_template("tickets.html", event_name=EVENT_NAME, tickets=rows, q=q)
+        sql = """
+            SELECT t.*, u.username FROM tickets t
+            LEFT JOIN users u ON t.sold_by = u.id
+            WHERE t.sold_by =? AND (t.name LIKE? OR t.whatsapp LIKE? OR t.id LIKE?)
+            ORDER BY t.id DESC
+        """
+        tickets = db.execute(sql, (user["id"], f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
 
-
-@app.route("/export.csv")
-@login_required
-def export_csv():
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM tickets ORDER BY created_at").fetchall()
-    conn.close()
-
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Ticket ID", "Name", "WhatsApp", "Amount", "Used", "Created At", "Used At"])
-    for r in rows:
-        writer.writerow([r["id"], r["name"], r["whatsapp"], r["amount"],
-                          "Yes" if r["used"] else "No", r["created_at"], r["used_at"] or ""])
-
-    return Response(
-        buf.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment;filename=owambe_tickets.csv"},
-    )
-
+    return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=user)
 
 @app.route("/scan")
-@login_required
+@login_required()
 def scan():
     return render_template("scan.html", event_name=EVENT_NAME)
 
+@app.route("/api/verify/<int:ticket_id>")
+@login_required()
+def verify(ticket_id):
+    db = get_db()
+    ticket = db.execute("SELECT * FROM tickets WHERE id =?", (ticket_id,)).fetchone()
+    if not ticket:
+        return {"status": "invalid"}
+    if ticket["used"]:
+        return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
+    used_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("UPDATE tickets SET used = 1, used_at =? WHERE id =?", (used_time, ticket_id))
+    db.commit()
+    return {"status": "ok", "name": ticket["name"]}
 
-@app.route("/check_ticket", methods=["POST"])
-@login_required
-def check_ticket():
-    ticket_id = (request.form.get("data") or "").strip().upper()
+@app.route("/ticket/<int:ticket_id>")
+@login_required()
+def ticket(ticket_id):
+    db = get_db()
+    ticket = db.execute("SELECT * FROM tickets WHERE id =?", (ticket_id,)).fetchone()
+    if not ticket:
+        return "Ticket not found", 404
+    qr = qrcode.make(f"https://yourdomain.com/api/verify/{ticket_id}")
+    buf = io.BytesIO()
+    qr.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(buf.getvalue(), mimetype="image/png")
 
-    # Allow pasting a full verification URL, not just the raw ID
-    if "/ticket/" in ticket_id:
-        ticket_id = ticket_id.rstrip("/").split("/ticket/")[-1].upper()
-
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
-
-    if not row:
-        conn.close()
-        return jsonify(status="INVALID", msg="This ticket ID was not found. Not sold at the door.")
-
-    if row["used"]:
-        conn.close()
-        return jsonify(
-            status="ALREADY USED",
-            msg=f"Already checked in at {row['used_at']}.",
-            name=row["name"],
-            whatsapp=row["whatsapp"],
-        )
-
-    used_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("UPDATE tickets SET used=1, used_at=? WHERE id=?", (used_at, ticket_id))
-    conn.commit()
-    conn.close()
-
-    return jsonify(
-        status="VALID",
-        msg="Checked in successfully.",
-        name=row["name"],
-        whatsapp=row["whatsapp"],
-    )
-
-
-@app.route("/ticket/<ticket_id>")
-def view_ticket(ticket_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tickets WHERE id=?", (ticket_id.upper(),)).fetchone()
-    conn.close()
-    return render_template("ticket.html", event_name=EVENT_NAME, ticket=row, ticket_id=ticket_id.upper())
-
+@app.route("/export")
+@login_required(role="admin")
+def export_csv():
+    db = get_db()
+    tickets = db.execute("""
+        SELECT t.*, u.username FROM tickets t
+        LEFT JOIN users u ON t.sold_by = u.id
+        ORDER BY t.id DESC
+    """).fetchall()
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerow(["ID", "Name", "WhatsApp", "Sold By", "Created At", "Used", "Used At"])
+    for t in tickets:
+        cw.writerow([t["id"], t["name"], t["whatsapp"], t["username"], t["created_at"], t["used"], t["used_at"]])
+    output = si.getvalue()
+    return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=tickets.csv"})
 
 if __name__ == "__main__":
     app.run(debug=True)
