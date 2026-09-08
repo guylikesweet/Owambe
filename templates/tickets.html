@@ -12,11 +12,44 @@
 <div class="toolbar" style="margin-bottom:14px;">
   <span style="color:var(--muted); font-size:14px;">{{ tickets|length }} ticket{{ 's' if tickets|length != 1 else '' }}</span>
   <div style="display:flex; gap:14px; font-size:14px;">
-            {% endif %}
+    <a href="{{ url_for('export_csv') }}">Export CSV</a>
+    <a href="{{ url_for('sell') }}">Ticket Desk</a>
+    <a href="{{ url_for('scan') }}">Scanner</a>
+    {% if user.role == 'admin' %}  {# NEW #}
+      <a href="{{ url_for('report') }}">Report</a>
+    {% endif %}
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>WhatsApp</th>
+      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}  {# NEW #}
+      <th>Sold</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tickets %}
+    <tr>
+      <td data-label="ID">{{ t.id }}</td>
+      <td data-label="Name">{{ t.name }}</td>
+      <td data-label="WhatsApp">{{ t.whatsapp }}</td>
+      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}  {# NEW #}
+      <td data-label="Sold">{{ t.created_at }}</td>
+      <td data-label="Status">
+        {% if t.used %}
+          <span class="badge used">Checked In {{ t.used_at }}</span>
+        {% else %}
+          <span class="badge valid">Not Yet</span>
+        {% endif %}
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="5" style="color:var(--muted);">No tickets match.</td></tr>
+    <tr><td colspan="{% if user.role == 'admin' %}6{% else %}5{% endif %}" style="color:var(--muted);">No tickets match.</td></tr>  {# updated colspan #}
     {% endfor %}
   </tbody>
 </table>
