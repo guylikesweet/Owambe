@@ -19,7 +19,6 @@ def get_db():
 
 def init_db():
     db = get_db()
-    # Tickets table with sold_by
     db.execute("""
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +31,6 @@ def init_db():
             FOREIGN KEY (sold_by) REFERENCES users (id)
         )
     """)
-    # Users table
     db.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +39,6 @@ def init_db():
             role TEXT DEFAULT 'seller'
         )
     """)
-    # Create default admin if no users exist
     user = db.execute("SELECT * FROM users").fetchone()
     if not user:
         db.execute("INSERT INTO users (username, password_hash, role) VALUES (?,?,?)",
@@ -49,7 +46,6 @@ def init_db():
         print("Default admin created: admin / admin123")
     db.commit()
 
-# Run DB init on startup for Flask 3.x
 with app.app_context():
     init_db()
 
@@ -82,7 +78,6 @@ def login():
         password = request.form["password"]
         db = get_db()
         user = db.execute("SELECT * FROM users WHERE username =?", (username,)).fetchone()
-
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
             return redirect(url_for("sell"))
@@ -127,7 +122,6 @@ def report():
         GROUP BY u.id
         ORDER BY total_cash DESC
     """, (TICKET_PRICE,)).fetchall()
-
     users = db.execute("SELECT * FROM users ORDER BY role, username").fetchall()
     return render_template("report.html", sales=sales, users=users, event_name=EVENT_NAME, user=g.user)
 
@@ -137,34 +131,22 @@ def report():
 def sell():
     db = get_db()
     user = g.user
-
     if request.method == "POST":
         name = request.form["name"]
         whatsapp = request.form["whatsapp"]
         created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         db.execute("INSERT INTO tickets (name, whatsapp, created_at, sold_by) VALUES (?,?,?,?)",
-                   (name, whatsapp, created, user["id"])) # FIXED: 4 question marks
+                   (name, whatsapp, created, user["id"]))
         db.commit()
-        flash(f"Ticket issued for {name}", "success")
-        return redirect(url_for("sell"))
+        ticket_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return redirect(url_for("ticket_issued", ticket_id=ticket_id)) # <-- redirects to YOUR page
 
-    # Stats: different for admin vs seller
     if user["role"] == "admin":
         stats = db.execute("SELECT COUNT(*), COALESCE(SUM(?),0), SUM(used) FROM tickets", (TICKET_PRICE,)).fetchone()
-        recent = db.execute("""
-            SELECT t.*, u.username FROM tickets t
-            LEFT JOIN users u ON t.sold_by = u.id
-            ORDER BY t.id DESC LIMIT 10
-        """).fetchall()
+        recent = db.execute("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC LIMIT 10").fetchall()
     else:
-        stats = db.execute("SELECT COUNT(*), COALESCE(SUM(?),0), SUM(used) FROM tickets WHERE sold_by =?",
-                           (TICKET_PRICE, user["id"])).fetchone()
-        recent = db.execute("""
-            SELECT t.*, u.username FROM tickets t
-            LEFT JOIN users u ON t.sold_by = u.id
-            WHERE t.sold_by =?
-            ORDER BY t.id DESC LIMIT 10
-        """, (user["id"],)).fetchall()
+        stats = db.execute("SELECT COUNT(*), COALESCE(SUM(?),0), SUM(used) FROM tickets WHERE sold_by =?", (TICKET_PRICE, user["id"])).fetchone()
+        recent = db.execute("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.sold_by =? ORDER BY t.id DESC LIMIT 10", (user["id"],)).fetchall()
 
     return render_template("sell.html",
         total_sold=stats[0] or 0, total_cash=stats[1] or 0, total_used=stats[2] or 0,
@@ -176,30 +158,64 @@ def all_tickets():
     db = get_db()
     user = g.user
     q = request.args.get("q", "")
-
     if user["role"] == "admin":
-        sql = """
-            SELECT t.*, u.username FROM tickets t
-            LEFT JOIN users u ON t.sold_by = u.id
-            WHERE t.name LIKE? OR t.whatsapp LIKE? OR t.id LIKE?
-            ORDER BY t.id DESC
-        """
+        sql = "SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.name LIKE? OR t.whatsapp LIKE? OR t.id LIKE? ORDER BY t.id DESC"
         tickets = db.execute(sql, (f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
     else:
-        sql = """
-            SELECT t.*, u.username FROM tickets t
-            LEFT JOIN users u ON t.sold_by = u.id
-            WHERE t.sold_by =? AND (t.name LIKE? OR t.whatsapp LIKE? OR t.id LIKE?)
-            ORDER BY t.id DESC
-        """
+        sql = "SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.sold_by =? AND (t.name LIKE? OR t.whatsapp LIKE? OR t.id LIKE?) ORDER BY t.id DESC"
         tickets = db.execute(sql, (user["id"], f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
-
     return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=user)
 
 @app.route("/scan")
 @login_required()
 def scan():
     return render_template("scan.html", event_name=EVENT_NAME, user=g.user)
+
+# THIS MAKES YOUR ticket_issued.html WORK
+@app.route("/ticket_issued/<int:ticket_id>")
+@login_required()
+def ticket_issued(ticket_id):
+    db = get_db()
+    ticket = db.execute("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id =?", (ticket_id,)).fetchone()
+    if not ticket:
+        return "Ticket not found", 404
+
+    # Create static/qr folder if it doesn't exist
+    qr_folder = os.path.join(app.root_path, 'static', 'qr')
+    os.makedirs(qr_folder, exist_ok=True)
+    qr_path = os.path.join(qr_folder, f"{ticket_id}.png")
+
+    # Generate QR and save it
+    if not os.path.exists(qr_path):
+        qr = qrcode.make(f"{request.host_url}api/verify/{ticket_id}")
+        qr.save(qr_path)
+
+    return render_template("ticket_issued.html",
+                           ticket=ticket,
+                           event_name=EVENT_NAME,
+                           price=TICKET_PRICE,
+                           qr_exists=True,
+                           user=g.user)
+
+@app.route("/check_ticket", methods=["POST"])
+@login_required()
+def check_ticket():
+    data = request.form.get("data", "").strip()
+    db = get_db()
+    if "/ticket/" in data: data = data.split("/ticket/")[1]
+    if "/api/verify/" in data: data = data.split("/api/verify/")[1]
+    if not data.isdigit():
+        return {"status": "INVALID", "msg": "Ticket ID must be a number"}
+    ticket_id = int(data)
+    ticket = db.execute("SELECT * FROM tickets WHERE id =?", (ticket_id,)).fetchone()
+    if not ticket:
+        return {"status": "INVALID", "msg": f"Ticket #{ticket_id} not found"}
+    if ticket["used"]:
+        return {"status": "ALREADY USED", "msg": f"Already scanned at {ticket['used_at']}", "name": ticket["name"], "whatsapp": ticket["whatsapp"]}
+    used_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("UPDATE tickets SET used = 1, used_at =? WHERE id =?", (used_time, ticket_id))
+    db.commit()
+    return {"status": "VALID", "msg": "Entry Approved", "name": ticket["name"], "whatsapp": ticket["whatsapp"]}
 
 @app.route("/api/verify/<int:ticket_id>")
 @login_required()
@@ -215,28 +231,11 @@ def verify(ticket_id):
     db.commit()
     return {"status": "ok", "name": ticket["name"]}
 
-@app.route("/ticket/<int:ticket_id>")
-@login_required()
-def ticket(ticket_id):
-    db = get_db()
-    ticket = db.execute("SELECT * FROM tickets WHERE id =?", (ticket_id,)).fetchone()
-    if not ticket:
-        return "Ticket not found", 404
-    qr = qrcode.make(f"{request.host_url}api/verify/{ticket_id}") # FIXED: uses your domain automatically
-    buf = io.BytesIO()
-    qr.save(buf, format="PNG")
-    buf.seek(0)
-    return Response(buf.getvalue(), mimetype="image/png")
-
 @app.route("/export")
 @login_required(role="admin")
 def export_csv():
     db = get_db()
-    tickets = db.execute("""
-        SELECT t.*, u.username FROM tickets t
-        LEFT JOIN users u ON t.sold_by = u.id
-        ORDER BY t.id DESC
-    """).fetchall()
+    tickets = db.execute("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC").fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
     cw.writerow(["ID", "Name", "WhatsApp", "Sold By", "Created At", "Used", "Used At"])
