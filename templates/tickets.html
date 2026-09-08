@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}All Tickets · {{ event_name }}{% endblock %}
+{% block tagline %}All Tickets{% endblock %}
+{% block wrapclass %} wide{% endblock %}
+
+{% block content %}
+<form class="search-bar" method="get">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search by name, WhatsApp, or ticket ID">
+  <button type="submit">Search</button>
+</form>
+
+<div class="toolbar" style="margin-bottom:14px;">
+  <span style="color:var(--muted); font-size:14px;">{{ tickets|length }} ticket{{ 's' if tickets|length != 1 else '' }}</span>
+  <div style="display:flex; gap:14px; font-size:14px;">
+    <a href="{{ url_for('export_csv') }}">Export CSV</a>
+    <a href="{{ url_for('sell') }}">Ticket Desk</a>
+    <a href="{{ url_for('scan') }}">Scanner</a>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>WhatsApp</th><th>Sold</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for t in tickets %}
+    <tr>
+      <td data-label="ID">{{ t.id }}</td>
+      <td data-label="Name">{{ t.name }}</td>
+      <td data-label="WhatsApp">{{ t.whatsapp }}</td>
+      <td data-label="Sold">{{ t.created_at }}</td>
+      <td data-label="Status">
+        {% if t.used %}
+          <span class="badge used">Checked In {{ t.used_at }}</span>
+        {% else %}
+          <span class="badge valid">Not Yet</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" style="color:var(--muted);">No tickets match.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
