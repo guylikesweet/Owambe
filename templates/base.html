@@ -17,10 +17,10 @@
   <div class="divider"></div>
   {% endblock %}
 
-  {% with messages = get_flashed_messages() %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
-      {% for m in messages %}
-        <div class="flash">{{ m }}</div>
+      {% for category, m in messages %}
+        <div class="flash{{ ' success' if category == 'success' else '' }}">{{ m }}</div>
       {% endfor %}
     {% endif %}
   {% endwith %}
