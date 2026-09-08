@@ -51,7 +51,7 @@
 <table>
   <thead>
     <tr>
-      <th>ID</th>
+      <th>Ticket Code</th>  <!-- CHANGED: was ID -->
       <th>Name</th>
       <th>WhatsApp</th>
       {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}  {# 3. NEW #}
@@ -61,7 +61,7 @@
   <tbody>
     {% for t in recent %}
     <tr>
-      <td data-label="ID">{{ t.id }}</td>
+      <td data-label="Ticket Code"><b>{{ t.ticket_code }}</b></td> <!-- CHANGED: was t.id -->
       <td data-label="Name">{{ t.name }}</td>
       <td data-label="WhatsApp">{{ t.whatsapp }}</td>
       {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}  {# 3. NEW #}
