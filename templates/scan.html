@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Scan Tickets · {{ event_name }}{% endblock %}
+{% block tagline %}Door Check-in{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2 style="text-align:center;">Scan Ticket</h2>
+  <p class="scan-hint" style="margin-top:0;">Point camera at QR, or type the 8-character ticket ID and press Enter.</p>
+
+  <!-- CAMERA BOX -->
+  <div id="reader" style="width:100%; max-width:400px; margin:20px auto; border:3px solid var(--accent); border-radius:12px; overflow:hidden;"></div>
+
+  <form id="scan-form" autocomplete="off" onsubmit="return false;">
+    <input type="text" id="scanner-input" placeholder="Scan or type ticket ID" autofocus>
+  </form>
+
+  <div id="scan-result"></div>
+
+  <a href="{{ url_for('sell') }}" class="btn secondary" style="margin-top:26px;">Back to Ticket Desk</a>
+</div>
+
+<!-- BEEP SOUND -->
+<audio id="beepSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+
+<!-- QR SCANNER LIBRARY -->
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+<script>
+const input = document.getElementById('scanner-input');
+const resultBox = document.getElementById('scan-result');
+const beep = document.getElementById('beepSound');
+let canScan = true; // prevent scanning same QR 10 times
+
+function renderResult(data) {
+  beep.play(); // BEEP when result comes back
+  let cls = 'invalid';
+  let icon = '❌';
+  if (data.status === 'VALID') { cls = 'valid'; icon = '✅'; }
+  else if (data.status === 'ALREADY USED') { cls = 'used'; icon = '⚠️'; }
+
+  let guestInfo = '';
+  if (data.name) {
+    guestInfo = `
+      <div class="ticket-details">
+        <div class="field"><span class="k">Guest Name</span><div class="v">${escapeHtml(data.name)}</div></div>
+        <div class="field"><span class="k">WhatsApp</span><div class="v">${escapeHtml(data.whatsapp)}</div></div>
+      </div>`;
+  }
+
+  resultBox.innerHTML = `
+    <div class="status-block">
+      <div class="status-icon">${icon}</div>
+      <div class="status-title ${cls}">${data.status}</div>
+      <p style="color:var(--muted); font-size:14px;">${escapeHtml(data.msg)}</p>
+    </div>
+    ${guestInfo}
+  `;
+
+  // cooldown 2.5s
+  canScan = false;
+  setTimeout(() => { canScan = true; }, 2500);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+async function checkTicket(value) {
+  if (!value) return;
+  const formData = new FormData();
+  // Handle full URL from QR
+  if (value.includes('/ticket/')) {
+    value = value.split('/ticket/')[1];
+  }
+  formData.append('data', value.trim().toUpperCase());
+
+  try {
+    const res = await fetch("{{ url_for('check_ticket') }}", { method: 'POST', body: formData });
+    const data = await res.json();
+    renderResult(data);
+  } catch (err) {
+    resultBox.innerHTML = `<div class="status-block"><div class="status-title invalid">ERROR</div><p style="color:var(--muted);">Could not reach the server.</p></div>`;
+  }
+
+  input.value = '';
+  input.focus();
+}
+
+// MANUAL INPUT
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    checkTicket(input.value.trim());
+  }
+});
+
+// CAMERA SCANNER
+function onScanSuccess(decodedText) {
+  if(!canScan) return;
+  checkTicket(decodedText);
+}
+
+let html5QrcodeScanner = new Html5QrcodeScanner(
+  "reader",
+  { fps: 10, qrbox: {width: 250, height: 250} }
+);
+html5QrcodeScanner.render(onScanSuccess);
+</script>
+{% endblock %}
