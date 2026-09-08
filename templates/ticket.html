@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Ticket Check · {{ event_name }}{% endblock %}
+{% block tagline %}Ticket Verification{% endblock %}
+
+{% block content %}
+<div class="card">
+  {% if ticket %}
+    <div class="status-block">
+      <div class="status-icon">✅</div>
+      <div class="status-title valid">TICKET VALID</div>
+    </div>
+    <div class="ticket-details">
+      <div class="field"><span class="k">Ticket ID</span><div class="v">{{ ticket.id }}</div></div>
+      <div class="field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
+      <div class="field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
+      <div class="field">
+        <span class="k">Door Status</span>
+        <div class="v">
+          {% if ticket.used %}
+            <span class="badge used">Already checked in — {{ ticket.used_at }}</span>
+          {% else %}
+            <span class="badge valid">Not yet checked in</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <p style="text-align:center; color:var(--muted); font-size:12px; margin-top:20px;">
+      This page confirms a ticket exists in the system. Check the guest in from the Scanner page at the door.
+    </p>
+  {% else %}
+    <div class="status-block">
+      <div class="status-icon">❌</div>
+      <div class="status-title invalid">INVALID TICKET</div>
+    </div>
+    <p style="text-align:center; color:var(--muted); font-size:13px;">
+      Ticket ID <b>{{ ticket_id }}</b> was not found. This is not a valid ticket for {{ event_name }}.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}
