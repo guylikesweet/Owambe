@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Admin Login · {{ event_name }}{% endblock %}
+{% block tagline %}Admin Login{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2 style="text-align:center; margin-bottom: 4px;">Sign in</h2>
+  <p style="text-align:center; color:var(--muted); font-size:14px; margin:0;">Ticket desk access only</p>
+
+  <form method="post">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+    <button type="submit">Login</button>
+  </form>
+
+  {% if error %}
+    <div class="error-msg">{{ error }}</div>
+  {% endif %}
+</div>
+{% endblock %}
