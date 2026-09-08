@@ -114,7 +114,8 @@ label {
 input[type="text"],
 input[type="password"],
 input[type="tel"],
-input {
+input,
+select {
   width: 100%;
   padding: 12px 14px;
   background: var(--bg);
@@ -125,6 +126,7 @@ input {
   font-family: inherit;
 }
 
+select:focus,
 input:focus {
   outline: none;
   border-color: var(--gold);
@@ -184,6 +186,12 @@ button:hover, .btn:hover { filter: brightness(1.08); text-decoration: none; }
   border-radius: 8px;
   font-size: 14px;
   margin-bottom: 18px;
+}
+
+.flash.success {
+  background: rgba(46,139,100,0.14);
+  border: 1px solid rgba(46,139,100,0.4);
+  color: var(--emerald-bright);
 }
 
 /* Stat pills on the sell dashboard */
