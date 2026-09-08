@@ -139,7 +139,7 @@ def sell():
                    (name, whatsapp, created, user["id"]))
         db.commit()
         ticket_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        return redirect(url_for("ticket_issued", ticket_id=ticket_id)) # <-- redirects to YOUR page
+        return redirect(url_for("ticket_issued", ticket_id=ticket_id))
 
     if user["role"] == "admin":
         stats = db.execute("SELECT COUNT(*), COALESCE(SUM(?),0), SUM(used) FROM tickets", (TICKET_PRICE,)).fetchone()
@@ -171,7 +171,18 @@ def all_tickets():
 def scan():
     return render_template("scan.html", event_name=EVENT_NAME, user=g.user)
 
-# THIS MAKES YOUR ticket_issued.html WORK
+# NEW: Generate QR on the fly, no file save
+@app.route("/qr/<int:ticket_id>.png")
+@login_required()
+def qr_image(ticket_id):
+    verify_url = f"{request.host_url}api/verify/{ticket_id}"
+    img = qrcode.make(verify_url)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return Response(buf.getvalue(), mimetype="image/png")
+
+# UPDATED: No file saving
 @app.route("/ticket_issued/<int:ticket_id>")
 @login_required()
 def ticket_issued(ticket_id):
@@ -179,16 +190,6 @@ def ticket_issued(ticket_id):
     ticket = db.execute("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id =?", (ticket_id,)).fetchone()
     if not ticket:
         return "Ticket not found", 404
-
-    # Create static/qr folder if it doesn't exist
-    qr_folder = os.path.join(app.root_path, 'static', 'qr')
-    os.makedirs(qr_folder, exist_ok=True)
-    qr_path = os.path.join(qr_folder, f"{ticket_id}.png")
-
-    # Generate QR and save it
-    if not os.path.exists(qr_path):
-        qr = qrcode.make(f"{request.host_url}api/verify/{ticket_id}")
-        qr.save(qr_path)
 
     return render_template("ticket_issued.html",
                            ticket=ticket,
