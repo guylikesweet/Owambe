@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}{{ event_name }}{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="wrap{% block wrapclass %}{% endblock %}">
+  {% block header %}
+  <div class="brand">
+    <div class="crest">BE</div>
+    <div class="event-name">{{ event_name }}</div>
+    <div class="tagline">{% block tagline %}Ticketing &amp; Guest Check-in{% endblock %}</div>
+  </div>
+  <div class="divider"></div>
+  {% endblock %}
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for m in messages %}
+        <div class="flash">{{ m }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>
