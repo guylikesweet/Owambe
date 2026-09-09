@@ -19,7 +19,6 @@
 </div>
 
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-<script src="/static/js/scanner_utils.js"></script>
 <script>
 const input = document.getElementById('scanner-input');
 const overlay = document.getElementById('scan-overlay');
@@ -30,6 +29,7 @@ const guestBox = document.getElementById('scan-guest');
 const handleButton = document.getElementById('scan-handle');
 let canScan = true;
 let activeResult = null;
+let html5QrCode = null; // CHANGED: use Html5Qrcode instead of Scanner
 
 function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str || ''; return div.innerHTML; }
 
@@ -61,8 +61,6 @@ function showResult(data) {
   messageBox.textContent = data.msg || '';
 
   if (isMultiple && Array.isArray(data.matches)) {
-    // Several tickets share this WhatsApp number — let the gate staff pick the right guest
-    // instead of silently checking nobody in.
     guestBox.innerHTML = data.matches.map(m => `
       <button type="button" class="btn secondary match-pick" data-code="${escapeHtml(m.ticket_code)}" style="margin-top:0;">
         ${escapeHtml(m.name)}${m.used ? ' — already checked in' : ''}
@@ -82,11 +80,12 @@ function showResult(data) {
   if (isValid) playTone('valid'); else if (!isMultiple) playTone('invalid');
   overlay.hidden = false;
   document.body.classList.add('modal-open');
-  if (!isMultiple) canScan = false;
+  if (!isMultiple) canScan = false; // Stop scanning
 }
 
 async function checkTicket(value) {
   if (!value || !canScan) return;
+  canScan = false; // Lock immediately
   value = value.trim();
   const formData = new FormData(); formData.append('data', value); formData.append('csrf_token', '{{ csrf_token() }}');
   try {
@@ -99,19 +98,32 @@ async function checkTicket(value) {
   input.value = '';
 }
 
-handleButton.addEventListener('click', () => {
+handleButton.addEventListener('click', async () => {
   overlay.hidden = true;
   document.body.classList.remove('modal-open');
   activeResult = null;
-  canScan = true;
   input.value = '';
   input.focus();
+  
+  // RESTART SCANNER
+  canScan = true;
+  if(html5QrCode){
+    await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess);
+  }
 });
 
 input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkTicket(input.value); } });
 
-function onScanSuccess(decodedText) { if (!canScan) return; checkTicket(decodedText); }
-let html5QrcodeScanner = new Html5QrcodeScanner('reader', {fps:10, qrbox:{width:250,height:250}}, false);
-html5QrcodeScanner.render(onScanSuccess);
+function onScanSuccess(decodedText) { 
+  if (!canScan) return; 
+  html5QrCode.stop(); // STOP CAMERA IMMEDIATELY
+  checkTicket(decodedText); 
+}
+
+// INIT SCANNER
+document.addEventListener('DOMContentLoaded', async () => {
+  html5QrCode = new Html5Qrcode("reader");
+  await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess);
+});
 </script>
 {% endblock %}
