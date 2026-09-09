@@ -7,16 +7,23 @@
   {% if ticket %}
     <div class="status-block">
       <div class="status-icon">✅</div>
-      <div class="status-title valid">TICKET VALID</div>
+      <div class="status-title {{ 'invalid' if ticket.status == 'cancelled' else 'valid' }}">
+        {{ 'TICKET CANCELLED' if ticket.status == 'cancelled' else 'TICKET VALID' }}
+      </div>
     </div>
-    <div class="ticket-details">
+    
+    <div class="ticket-details" id="ticket-data">
       <div class="field"><span class="k">Ticket ID</span><div class="v">{{ ticket.id }}</div></div>
       <div class="field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
       <div class="field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
+      <div class="field"><span class="k">Amount Paid</span><div class="v">₦{{ "{:,}".format(ticket.amount_paid) }}</div></div>
+      <div class="field"><span class="k">Event</span><div class="v">{{ event_name }}</div></div>
       <div class="field">
         <span class="k">Door Status</span>
         <div class="v">
-          {% if ticket.used %}
+          {% if ticket.status == 'cancelled' %}
+            <span class="badge danger">Cancelled</span>
+          {% elif ticket.used %}
             <span class="badge used">Already checked in — {{ ticket.used_at }}</span>
           {% else %}
             <span class="badge valid">Not yet checked in</span>
@@ -24,6 +31,20 @@
         </div>
       </div>
     </div>
+
+    <!-- NEW ACTIONS -->
+    <div class="stack-actions" style="margin-top:20px">
+      {% if ticket.status != 'cancelled' %}
+      <button class="btn" onclick="handleTicketAction('wa')">Send Ticket via WhatsApp</button>
+      <button class="btn secondary" onclick="handleTicketAction('download')">Download Ticket PDF</button>
+      <form method="POST" action="{{ url_for('cancel_ticket', ticket_id=ticket.id) }}" onsubmit="return confirm('Cancel this ticket and mark for refund?')">
+        <button type="submit" class="btn danger-button">Cancel Ticket & Refund</button>
+      </form>
+      {% else %}
+      <button class="btn secondary" onclick="handleTicketAction('download')">Reprint Cancelled Ticket PDF</button>
+      {% endif %}
+    </div>
+
     <p style="text-align:center; color:var(--muted); font-size:12px; margin-top:20px;">
       This page confirms a ticket exists in the system. Check the guest in from the Scanner page at the door.
     </p>
@@ -37,4 +58,24 @@
     </p>
   {% endif %}
 </div>
+
+<script>
+// Build ticket object from template
+const currentTicket = {
+    ticket_id: "{{ ticket.id if ticket else ticket_id }}",
+    event_name: "{{ event_name }}",
+    guest_name: "{{ ticket.name if ticket else '' }}",
+    phone: "{{ ticket.whatsapp if ticket else '' }}",
+    amount: "{{ "{:,}".format(ticket.amount_paid) if ticket else '0' }}",
+    status: "{{ ticket.status if ticket else 'invalid' }}"
+};
+
+function handleTicketAction(action) {
+    if(action === 'download') {
+        downloadTicket(currentTicket);
+    } else {
+        sendTicketViaWhatsApp(currentTicket);
+    }
+}
+</script>
 {% endblock %}
