@@ -1,14 +1,22 @@
-from flask import Flask, render_template, request, redirect, url_for, session, g, flash, Response
+from flask import Flask, render_template, request, redirect, url_for, session, g, flash, Response, abort
 import os, io, csv, secrets, string, re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import qrcode
 import psycopg2
+from functools import wraps
 import psycopg2.extras
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "change-this-in-render")
+app.secret_key = os.environ.get("SECRET_KEY")
+if not app.secret_key:
+    raise RuntimeError("SECRET_KEY must be configured in production")
+limiter = Limiter(key_func=get_remote_address, default_limits=["300 per hour"], storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"))
+limiter.init_app(app)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "1") == "1", SESSION_COOKIE_SAMESITE="Lax")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -18,6 +26,23 @@ EVENT_NAME = "BE Owambe"
 DEFAULT_TICKET_PRICE = 3500
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 TICKET_ALPHABET = string.ascii_uppercase + string.digits
+
+
+# Lightweight CSRF protection for all state-changing form/API requests.
+def csrf_token():
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+@app.before_request
+def protect_requests():
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        supplied = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+        if not supplied or not secrets.compare_digest(supplied, session.get("csrf_token", "")):
+            abort(400, description="Invalid or missing CSRF token")
 
 def generate_ticket_code():
     # Non-sequential, case-insensitive-safe code with enough entropy to resist guessing.
@@ -158,6 +183,23 @@ def current_user():
     return query("SELECT * FROM users WHERE id = %s", (session["user_id"],)).fetchone()
 
 
+def original_admin_required(f):
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user or not user["active"] or user["role"] != "admin":
+            session.clear() if not user or not user["active"] else None
+            flash("Only the original administrator can access this feature.", "error")
+            return redirect(url_for("home"))
+        original = query("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+        if not original or user["id"] != original["id"]:
+            flash("Only the original administrator can access this feature.", "error")
+            return redirect(url_for("home"))
+        g.user = user
+        return f(*args, **kwargs)
+    wrapper.__name__ = f.__name__
+    return wrapper
+
+
 def login_required(role=None):
     def decorator(f):
         def wrapper(*args, **kwargs):
@@ -179,6 +221,7 @@ def login_required(role=None):
 
 # ------------------ AUTH ROUTES ------------------
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -262,6 +305,19 @@ def remove_seller(user_id):
     return redirect(url_for("report"))
 
 
+
+@app.route("/admin/remove_admin/<int:user_id>", methods=["POST"])
+@original_admin_required
+def remove_admin(user_id):
+    admin = query("SELECT * FROM users WHERE id = %s AND role = 'admin'", (user_id,)).fetchone()
+    original = query("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+    if not admin or admin["id"] == original["id"]:
+        flash("That administrator cannot be removed.", "error")
+    else:
+        query("UPDATE users SET active = FALSE WHERE id = %s", (user_id,)); get_db().commit()
+        flash(f"Admin {admin['username']} was removed.", "success")
+    return redirect(url_for("report"))
+
 @app.route("/admin/restore_seller/<int:user_id>", methods=["POST"])
 @login_required(role="admin")
 def restore_seller(user_id):
@@ -293,7 +349,7 @@ def update_price():
 
 
 @app.route("/admin/reset_tickets", methods=["POST"])
-@login_required(role="admin")
+@original_admin_required
 def reset_tickets():
     confirmation = request.form.get("confirmation", "").strip().upper()
     if confirmation != "RESET":
@@ -462,6 +518,7 @@ def normalize_phone(raw):
 
 @app.route("/check_ticket", methods=["POST"])
 @login_required()
+@limiter.limit("60 per minute")
 def check_ticket():
     raw = request.form.get("data", "").strip()
     lookup = raw
@@ -503,7 +560,10 @@ def check_ticket():
         }
 
     used_time = lagos_timestamp()
-    query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s", (used_time, ticket["id"]))
+    updated = query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s AND used = FALSE RETURNING id", (used_time, ticket["id"])).fetchone()
+    if not updated:
+        get_db().rollback()
+        return {"status": "ALREADY USED", "msg": "This ticket has already been used."}
     get_db().commit()
     return {
         "status": "VALID", "msg": "Entry Approved", "name": ticket["name"],
@@ -521,7 +581,10 @@ def verify(ticket_code):
     if ticket["used"]:
         return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
     used_time = lagos_timestamp()
-    query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s", (used_time, ticket["id"]))
+    updated = query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s AND used = FALSE RETURNING id", (used_time, ticket["id"])).fetchone()
+    if not updated:
+        db.rollback()
+        return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
     db.commit()
     return {"status": "ok", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
 

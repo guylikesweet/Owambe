@@ -25,3 +25,12 @@ Flask ticketing app for selling tickets, generating non-sequential QR ticket cod
 ## Deployment
 
 Set `DATABASE_URL`, `SECRET_KEY`, and (if needed) `DB_SSLMODE` in the deployment environment. The app creates/updates its PostgreSQL tables on boot.
+
+## Render Free tier and data persistence
+
+- This application stores tickets, users, sales, check-ins, settings, and QR payloads in PostgreSQL through `DATABASE_URL`.
+- Render service sleep/restart/redeploy does not erase PostgreSQL data. Do not use SQLite or store important records in the service filesystem.
+- Set `SECRET_KEY` to a long random value and keep it unchanged across deploys so sessions remain valid.
+- Set `COOKIE_SECURE=1` when serving over HTTPS (the normal Render setup).
+- For multiple workers/instances, set `RATELIMIT_STORAGE_URI` to a shared Redis URL. The default `memory://` limiter is suitable only for a single running instance.
+- Before destructive maintenance, export/backup the PostgreSQL database. The developer ticket reset is intentionally restricted to the original admin.
