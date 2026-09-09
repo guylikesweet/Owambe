@@ -55,8 +55,8 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -2;
-  background: linear-gradient(rgba(6,25,35,.90), rgba(6,25,35,.94)), url('/static/img/owambe-flyer.jpg') center/cover no-repeat;
-  opacity: .32;
+  background: linear-gradient(rgba(6,25,35,.40), rgba(6,25,35,.55)), url('/static/img/owambe-flyer.jpg') center/cover no-repeat;
+  opacity: .5;
 }
 @media (prefers-color-scheme: light) {
   body::before { background: linear-gradient(rgba(238,247,249,.93), rgba(238,247,249,.96)), url('/static/img/owambe-flyer.jpg') center/cover no-repeat; opacity: .42; }
