@@ -6,6 +6,8 @@
 <meta name="theme-color" content="#0b1f2b">
 <title>{% block title %}{{ event_name }}{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/static/js/pdf_generator.js"></script>
 </head>
 <body>
 <div class="site-shell">
