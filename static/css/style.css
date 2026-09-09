@@ -55,8 +55,10 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -2;
-  background: linear-gradient(rgba(6,25,35,.90), rgba(6,25,35,.94)), url('/static/img/owambe-flyer.jpg') center/cover no-repeat;
+  background: linear-gradient(rgba(6,25,35,.40), rgba(6,25,35,.55)), url('/static/img/owambe-flyer.jpg') center/cover no-repeat;
   opacity: .32;
+  filter: blur(8px);
+  transform: scale(1.05);
 }
 @media (prefers-color-scheme: light) {
   body::before { background: linear-gradient(rgba(238,247,249,.93), rgba(238,247,249,.96)), url('/static/img/owambe-flyer.jpg') center/cover no-repeat; opacity: .42; }
@@ -68,6 +70,8 @@ body::after {
   z-index: -1;
   pointer-events: none;
   background: radial-gradient(circle at 15% 5%, rgba(66,215,233,.12), transparent 28%), radial-gradient(circle at 90% 15%, rgba(226,173,77,.10), transparent 24%);
+  filter: blur(8px);
+  transform: scale(1.05);
 }
 body.modal-open { overflow: hidden; }
 a { color: var(--cyan); text-decoration: none; }
