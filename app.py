@@ -26,13 +26,11 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 SSL_MODE = os.environ.get("DB_SSLMODE", "require")
 
-# FIX 1: Full event name
 EVENT_NAME = "Bioelites Class of 26' Owambe Experience and Award Ceremony"
 DEFAULT_TICKET_PRICE = 3500
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 TICKET_ALPHABET = string.ascii_uppercase + string.digits
 
-# Lightweight CSRF protection
 def csrf_token():
     token = session.get("csrf_token")
     if not token:
@@ -63,7 +61,6 @@ def lagos_now():
 def lagos_timestamp():
     return lagos_now().strftime("%Y-%m-%d %H:%M:%S")
 
-# ------------------ DB HELPERS ------------------
 def get_db():
     if "db" not in g:
         if not DATABASE_URL:
@@ -97,7 +94,6 @@ def init_db():
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
-    # FIX 2: Add seat column
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS seat TEXT DEFAULT 'General'")
     query("CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ticket_code ON tickets(ticket_code)")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE")
@@ -159,14 +155,13 @@ def build_ticket_pdf(ticket):
     c.setFillColor(HexColor("#0b1f2b"))
     c.rect(0, 0, width, height, fill=1, stroke=0)
     c.setFillColor(HexColor("#42d7e9"))
-    c.setFont("Helvetica-Bold", 12) # smaller font for long name
-    # Wrap event name
+    c.setFont("Helvetica-Bold", 12)
     lines = []
     words = EVENT_NAME.split()
     line = ""
     for word in words:
-        if len(line + " " + word) < 32:
-            line += " " + word if line else word
+        if len(line + " + word) < 32:
+            line += " + word if line else word
         else:
             lines.append(line)
             line = word
@@ -261,7 +256,6 @@ def login_required(role=None):
         return wrapper
     return decorator
 
-# ------------------ AUTH ROUTES ------------------
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute")
 def login():
@@ -305,7 +299,6 @@ def change_password():
             return redirect(url_for("home"))
     return render_template("change_password.html", event_name=EVENT_NAME, user=user)
 
-# ------------------ ADMIN ROUTES ------------------
 @app.route("/register", methods=["GET", "POST"])
 @login_required(role="admin")
 def register():
@@ -402,7 +395,6 @@ def report():
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
     return render_template("report.html", sales=sales, users=users, overall=overall, ticket_price=price, event_name=EVENT_NAME, user=g.user)
 
-# ------------------ MAIN APP ROUTES ------------------
 @app.route("/")
 @login_required()
 def home():
@@ -424,7 +416,6 @@ def sell():
             return redirect(url_for("sell"))
         created = lagos_timestamp()
         ticket_code = unique_ticket_code()
-        # FIX 3: Insert seat
         row = query("INSERT INTO tickets (ticket_code, name, whatsapp, seat, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id", (ticket_code, name, whatsapp, "General", created, user["id"], price, ticket_code)).fetchone()
         get_db().commit()
         return redirect(url_for("ticket_issued", ticket_id=row["id"]))
@@ -442,7 +433,6 @@ def all_tickets():
     tickets = query(sql, (like, like, like, like)).fetchall()
     return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user)
 
-# ------------------ NEW FEATURE ROUTES ------------------
 @app.route("/ticket/<int:ticket_id>/pdf")
 @login_required()
 def ticket_pdf(ticket_id):
@@ -468,7 +458,6 @@ def send_ticket_whatsapp(ticket_id):
     log_audit(ticket_id, "whatsapp_sent", g.user["id"], f"To {ticket['whatsapp']}")
     db.commit()
     link = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
-    # FIX 4: Full event name in WhatsApp message
     message = f"Hi {ticket['name']}! 🎉\n\nYour ticket for \"{EVENT_NAME}\" is ready.\nTicket code: {ticket['ticket_code']}\nDownload your ticket & QR here: {link}\n\nPlease present the QR code at the gate. See you there!"
     dial = whatsapp_dial_number(ticket["whatsapp"])
     wa_url = f"https://wa.me/{dial}?text={urllib.parse.quote(message)}"
@@ -517,6 +506,15 @@ def ticket_issued(ticket_id):
     ticket = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s", (ticket_id,)).fetchone()
     if not ticket:
         return "Ticket not found", 404
+    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, price=ticket["amount_paid"], qr_exists=True, user=g.user)
+
+# FIX: Added this missing route for "View" button in tickets.html
+@app.route("/ticket/<int:ticket_id>")
+@login_required()
+def ticket(ticket_id):
+    ticket = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s", (ticket_id,)).fetchone()
+    if not ticket:
+        abort(404)
     return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, price=ticket["amount_paid"], qr_exists=True, user=g.user)
 
 def normalize_phone(raw):
