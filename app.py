@@ -160,8 +160,8 @@ def build_ticket_pdf(ticket):
     words = EVENT_NAME.split()
     line = ""
     for word in words:
-        if len(line + " + word) < 32:
-            line += " + word if line else word
+        if len(line + " " + word) < 32:
+            line += " " + word if line else word
         else:
             lines.append(line)
             line = word
@@ -508,7 +508,6 @@ def ticket_issued(ticket_id):
         return "Ticket not found", 404
     return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, price=ticket["amount_paid"], qr_exists=True, user=g.user)
 
-# FIX: Added this missing route for "View" button in tickets.html
 @app.route("/ticket/<int:ticket_id>")
 @login_required()
 def ticket(ticket_id):
