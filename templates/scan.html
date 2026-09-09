@@ -70,7 +70,7 @@ function showResult(data) {
 async function checkTicket(value) {
   if (!value || !canScan) return;
   value = value.trim();
-  const formData = new FormData(); formData.append('data', value);
+  const formData = new FormData(); formData.append('data', value); formData.append('csrf_token', '{{ csrf_token() }}');
   try {
     const res = await fetch("{{ url_for('check_ticket') }}", {method:'POST', body:formData});
     const data = await res.json();
