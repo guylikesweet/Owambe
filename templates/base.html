@@ -14,7 +14,7 @@
       <img src="{{ url_for('static', filename='img/owambe-logo.png') }}" alt="Owambe logo">
     </a>
     <div class="header-copy">
-      <span class="event-kicker">BioElites26' · OWAMBE</span>
+      <span class="event-kicker">BE OWAMBE · CLASS OF 2026</span>
       <span class="event-tagline">Experience and Award Ceremony</span>
     </div>
   </header>
@@ -37,3 +37,7 @@
 </div>
 </body>
 </html>
+<script>
+document.addEventListener('click',e=>{const b=e.target.closest('.password-toggle');if(!b)return;const i=b.parentElement.querySelector('input');i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'◉':'◉';b.setAttribute('aria-label',i.type==='password'?'Show password':'Hide password')});
+function softNotify(){try{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain();o.frequency.value=520;g.gain.setValueAtTime(.035,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.12);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.12)}catch(e){}}
+</script>

@@ -3,8 +3,9 @@
 {% block content %}
 <div class="auth-page"><div class="card auth-card"><span class="eyebrow">ADMIN ONLY</span><h1>Add user</h1>
 <form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label for="username">Username</label><input type="text" id="username" name="username" required placeholder="e.g. john">
-<label for="password">Password</label><input type="password" id="password" name="password" required minlength="6" placeholder="Set a password">
+<label for="password">Password</label><span class="password-wrap"><input type="password" id="password" name="password" required minlength="6" placeholder="Set a password"><button type="button" class="password-toggle" aria-label="Show password">◉</button></span>
 <label for="role">Role</label><select id="role" name="role"><option value="seller">Seller</option><option value="admin">Admin</option></select>
 <button type="submit">Create User</button>
 </form><a href="{{ url_for('report') }}" class="btn secondary">Back to Admin Controls</a></div></div>

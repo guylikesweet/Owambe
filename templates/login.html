@@ -8,10 +8,11 @@
     <p class="muted">Sign in to manage ticket sales and guest check-in.</p>
     {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
     <form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label for="username">Username</label>
       <input type="text" id="username" name="username" autocomplete="username" required>
       <label for="password">Password</label>
-      <input type="password" id="password" name="password" autocomplete="current-password" required>
+      <span class="password-wrap"><input type="password" id="password" name="password" autocomplete="current-password" required><button type="button" class="password-toggle" aria-label="Show password">◉</button></span>
       <button type="submit">Sign in</button>
     </form>
   </div>

@@ -14,6 +14,7 @@
 
 <div class="card form-card">
   <form id="issue-form" method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="name">Guest Name</label>
     <input type="text" id="name" name="name" placeholder="e.g. Ibrahim Bolanle" required>
     <label for="whatsapp">WhatsApp Number</label>
