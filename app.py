@@ -93,7 +93,8 @@ def init_db():
             created_at TEXT,
             used_at TEXT,
             sold_by INTEGER REFERENCES users (id),
-            amount_paid INTEGER NOT NULL DEFAULT 3500
+            amount_paid INTEGER NOT NULL DEFAULT 3500,
+            qr_data TEXT
         )
     """)
     query("""
@@ -106,6 +107,7 @@ def init_db():
     # Safe upgrades for installations created by earlier versions.
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
     query("CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ticket_code ON tickets(ticket_code)")
 
     # Any legacy ticket without a code gets a secure code before the code is used operationally.
@@ -115,6 +117,10 @@ def init_db():
         while query("SELECT 1 FROM tickets WHERE ticket_code = %s", (code,)).fetchone():
             code = generate_ticket_code()
         query("UPDATE tickets SET ticket_code = %s WHERE id = %s", (code, row["id"]))
+
+    # Store the QR payload in PostgreSQL rather than storing QR image files on disk.
+    # The payload is the unpredictable public ticket code; the PNG is generated on demand.
+    query("UPDATE tickets SET qr_data = ticket_code WHERE qr_data IS NULL OR qr_data = ''")
 
     # Preserve the historical default price, but make it editable without a code deploy.
     query("""
@@ -359,8 +365,8 @@ def sell():
         created = lagos_timestamp()
         ticket_code = unique_ticket_code()
         row = query(
-            "INSERT INTO tickets (ticket_code, name, whatsapp, created_at, sold_by, amount_paid) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-            (ticket_code, name, whatsapp, created, user["id"], price),
+            "INSERT INTO tickets (ticket_code, name, whatsapp, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (ticket_code, name, whatsapp, created, user["id"], price, ticket_code),
         ).fetchone()
         get_db().commit()
         return redirect(url_for("ticket_issued", ticket_id=row["id"]))
@@ -412,19 +418,31 @@ def scan():
     return render_template("scan.html", event_name=EVENT_NAME, user=g.user)
 
 
-# Generate QR on the fly. The QR contains the non-sequential public ticket code.
-@app.route("/qr/<int:ticket_id>.png")
+# Generate QR images on demand. The QR payload itself is stored in PostgreSQL
+# (qr_data); no QR image files are written to static/qr or the server filesystem.
+@app.route("/qr/<path:ticket_code>.png")
 @login_required()
-def qr_image(ticket_id):
-    ticket = query("SELECT ticket_code FROM tickets WHERE id = %s", (ticket_id,)).fetchone()
+def qr_image(ticket_code):
+    ticket = query(
+        "SELECT ticket_code, qr_data FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)",
+        (ticket_code,),
+    ).fetchone()
     if not ticket:
         return "Ticket not found", 404
+
+    payload = ticket["qr_data"] or ticket["ticket_code"]
     verify_url = f"{request.host_url}api/verify/{ticket['ticket_code']}"
-    img = qrcode.make(verify_url)
+    # The QR carries the ticket code directly. The scanner can validate it through
+    # /check_ticket, while the verification URL remains useful for compatible readers.
+    img = qrcode.make(payload)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return Response(buf.getvalue(), mimetype="image/png")
+    return Response(
+        buf.getvalue(),
+        mimetype="image/png",
+        headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.png"'},
+    )
 
 
 @app.route("/ticket_issued/<int:ticket_id>")
