@@ -26,12 +26,13 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 SSL_MODE = os.environ.get("DB_SSLMODE", "require")
 
-EVENT_NAME = "BE Owambe"
+# FIX 1: Full event name
+EVENT_NAME = "Bioelites Class of 26' Owambe Experience and Award Ceremony"
 DEFAULT_TICKET_PRICE = 3500
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 TICKET_ALPHABET = string.ascii_uppercase + string.digits
 
-# Lightweight CSRF protection for all state-changing form/API requests.
+# Lightweight CSRF protection
 def csrf_token():
     token = session.get("csrf_token")
     if not token:
@@ -89,13 +90,15 @@ def query(sql, params=()):
 def init_db():
     db = get_db()
     query("""CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'seller', active BOOLEAN NOT NULL DEFAULT TRUE)""")
-    query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, seat TEXT DEFAULT 'General', used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
     query("""CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
     query("""CREATE TABLE IF NOT EXISTS ticket_audit (id SERIAL PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets (id), action TEXT NOT NULL, performed_by INTEGER REFERENCES users (id), detail TEXT, created_at TEXT)""")
 
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
+    # FIX 2: Add seat column
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS seat TEXT DEFAULT 'General'")
     query("CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ticket_code ON tickets(ticket_code)")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled_at TEXT")
@@ -156,19 +159,35 @@ def build_ticket_pdf(ticket):
     c.setFillColor(HexColor("#0b1f2b"))
     c.rect(0, 0, width, height, fill=1, stroke=0)
     c.setFillColor(HexColor("#42d7e9"))
-    c.setFont("Helvetica-Bold", 15)
-    c.drawCentredString(width / 2, height - 16 * mm, EVENT_NAME)
+    c.setFont("Helvetica-Bold", 12) # smaller font for long name
+    # Wrap event name
+    lines = []
+    words = EVENT_NAME.split()
+    line = ""
+    for word in words:
+        if len(line + " " + word) < 32:
+            line += " " + word if line else word
+        else:
+            lines.append(line)
+            line = word
+    if line: lines.append(line)
+    y = height - 14 * mm
+    for l in lines:
+        c.drawCentredString(width / 2, y, l)
+        y -= 6 * mm
+
     c.setFillColor(HexColor("#f4fbfd"))
     c.setFont("Helvetica", 10)
-    c.drawCentredString(width / 2, height - 23 * mm, "Event Ticket")
+    c.drawCentredString(width / 2, y - 2 * mm, "Event Ticket")
     qr_img = qrcode.make(ticket["qr_data"] or ticket["ticket_code"])
     qr_buf = io.BytesIO()
     qr_img.save(qr_buf, format="PNG")
     qr_buf.seek(0)
     qr_size = 55 * mm
     c.setFillColor(HexColor("#ffffff"))
-    c.roundRect((width - qr_size) / 2 - 4 * mm, height - 90 * mm - 4 * mm, qr_size + 8 * mm, qr_size + 8 * mm, 4, fill=1, stroke=0)
-    c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, height - 90 * mm, width=qr_size, height=qr_size, mask="auto")
+    c.roundRect((width - qr_size) / 2 - 4 * mm, height - 95 * mm - 4 * mm, qr_size + 8 * mm, qr_size + 8 * mm, 4, fill=1, stroke=0)
+    c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, height - 95 * mm, width=qr_size, height=qr_size, mask="auto")
+
     def field(y, label, value):
         c.setFillColor(HexColor("#a8c1c8"))
         c.setFont("Helvetica", 7.5)
@@ -176,11 +195,14 @@ def build_ticket_pdf(ticket):
         c.setFillColor(HexColor("#f4fbfd"))
         c.setFont("Helvetica-Bold", 11)
         c.drawString(10 * mm, y - 5 * mm, str(value)[:40])
-    y = height - 102 * mm
+
+    y = height - 110 * mm
     field(y, "Ticket Code", ticket["ticket_code"]); y -= 13 * mm
     field(y, "Guest Name", ticket["name"]); y -= 13 * mm
     field(y, "WhatsApp", ticket["whatsapp"]); y -= 13 * mm
+    field(y, "Seat", ticket.get("seat", "General")); y -= 13 * mm
     field(y, "Amount Paid", f"NGN {ticket['amount_paid']:,}")
+
     if ticket.get("cancelled"):
         c.saveState()
         c.setFillColor(HexColor("#ed5b63"))
@@ -402,7 +424,8 @@ def sell():
             return redirect(url_for("sell"))
         created = lagos_timestamp()
         ticket_code = unique_ticket_code()
-        row = query("INSERT INTO tickets (ticket_code, name, whatsapp, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id", (ticket_code, name, whatsapp, created, user["id"], price, ticket_code)).fetchone()
+        # FIX 3: Insert seat
+        row = query("INSERT INTO tickets (ticket_code, name, whatsapp, seat, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id", (ticket_code, name, whatsapp, "General", created, user["id"], price, ticket_code)).fetchone()
         get_db().commit()
         return redirect(url_for("ticket_issued", ticket_id=row["id"]))
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
@@ -445,7 +468,8 @@ def send_ticket_whatsapp(ticket_id):
     log_audit(ticket_id, "whatsapp_sent", g.user["id"], f"To {ticket['whatsapp']}")
     db.commit()
     link = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
-    message = f"Hi {ticket['name']}, here is your {EVENT_NAME} ticket.\nTicket code: {ticket['ticket_code']}\nDownload your ticket & QR here: {link}\nSee you there!"
+    # FIX 4: Full event name in WhatsApp message
+    message = f"Hi {ticket['name']}! 🎉\n\nYour ticket for \"{EVENT_NAME}\" is ready.\nTicket code: {ticket['ticket_code']}\nDownload your ticket & QR here: {link}\n\nPlease present the QR code at the gate. See you there!"
     dial = whatsapp_dial_number(ticket["whatsapp"])
     wa_url = f"https://wa.me/{dial}?text={urllib.parse.quote(message)}"
     return redirect(wa_url)
@@ -561,9 +585,9 @@ def export_csv():
     tickets = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC").fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Sold By", "Amount Paid", "Created At", "Used", "Used At", "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
+    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Seat", "Sold By", "Amount Paid", "Created At", "Used", "Used At", "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
     for t in tickets:
-        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t["username"], t["amount_paid"], t["created_at"], t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
+        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t.get("seat","General"), t["username"], t["amount_paid"], t["created_at"], t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
     return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=owambe_tickets.csv"})
 
 if __name__ == "__main__":
