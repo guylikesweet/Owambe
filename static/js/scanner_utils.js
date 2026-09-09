@@ -1,7 +1,9 @@
 // static/js/scanner_utils.js
-let scannerAudio = new Audio('/static/audio/invalid-long.mp3'); // new sound
+const successAudio = new Audio('/static/audio/success-beep.mp3'); // new success sound
+const errorAudio = new Audio('/static/audio/invalid-long.mp3'); // error sound
 
 function showScannerLoader() {
+    if(document.getElementById('scan-loader')) return;
     const loader = document.createElement('div');
     loader.id = 'scan-loader';
     loader.innerHTML = `
@@ -16,40 +18,58 @@ function hideScannerLoader() {
     if(loader) loader.remove();
 }
 
-function playInvalidSound() {
-    scannerAudio.currentTime = 0; // rewind
-    scannerAudio.play().catch(e => console.log("Audio play failed", e));
+function playSuccessSound() {
+    successAudio.currentTime = 0;
+    successAudio.play().catch(e => console.log("Audio play failed", e));
 }
 
-// This is the function you call in scan.html after qr code is read
-function handleScanResult(result, resultType) {
+function playErrorSound() {
+    errorAudio.currentTime = 0;
+    errorAudio.play().catch(e => console.log("Audio play failed", e));
+}
+
+// Backend returns: VALID, ALREADY USED, CANCELLED, INVALID, MULTIPLE
+function handleScanResult(data) {
     showScannerLoader();
     
-    // Wait 2 seconds before showing result
     setTimeout(() => {
         hideScannerLoader();
         
-        // Example: check if ticket is valid
-        // You probably already have this logic. Just wrap it
-        if(result.status === 'invalid' || result.status === 'used') {
-            playInvalidSound();
-            showScanOverlay('invalid', result.message);
+        // VALID and MULTIPLE = success sound
+        if(data.status === 'VALID' || data.status === 'MULTIPLE') {
+            playSuccessSound();
         } else {
-            showScanOverlay('valid', result.message);
+            // ALREADY USED, CANCELLED, INVALID = error sound
+            playErrorSound();
         }
+        
+        showScanOverlay(data);
     }, 2000);
 }
 
-// Reuse your existing overlay but add loader styles
-function showScanOverlay(status, message) {
+function showScanOverlay(data) {
     const overlay = document.querySelector('.scan-overlay');
     const title = overlay.querySelector('.status-title');
     const msg = overlay.querySelector('.status-message');
+    const details = overlay.querySelector('.ticket-details');
     
-    title.className = `status-title ${status}`;
-    title.textContent = status === 'valid' ? 'VALID' : 'INVALID';
-    msg.textContent = message;
+    let statusClass = 'valid';
     
+    if(data.status === 'VALID' || data.status === 'MULTIPLE') {
+        statusClass = 'valid'; // green
+    } else {
+        statusClass = 'invalid'; // red
+    }
+    
+    title.className = `status-title ${statusClass}`;
+    title.textContent = data.status;
+    msg.textContent = data.msg; 
+    
+    if(details && data.name) {
+        details.innerHTML = `<strong>${data.name}</strong><br><small>${data.ticket_code}</small>`;
+        details.hidden = false;
+    }
+
     overlay.hidden = false;
     document.body.classList.add('modal-open');
 }
