@@ -1,43 +1,27 @@
 # BE Owambe Ticket System
 
-Flask ticketing app — sell tickets, generate QR codes, check guests in at the door.
-Runs on Postgres so data survives Render sleeping/restarting the free-tier disk.
+Flask ticketing app for selling tickets, generating non-sequential QR ticket codes, and checking guests in at the door.
 
-## Environment variables (set these in Render's Environment tab)
+## Highlights
 
-| Variable | Required | Notes |
-|---|---|---|
-| `DATABASE_URL` | Yes | From your Render Postgres instance. Either the Internal or External URL works. |
-| `SECRET_KEY` | Recommended | Any random string. Used to sign session cookies. |
-| `DB_SSLMODE` | Only if needed | Defaults to `require`. Set to `disable` if you're using the Internal Database URL and get an SSL connection error. |
+- Owambe flyer used as a subtle site background.
+- Owambe logo in the top-left header.
+- Light/dark theme follows the handler device's system preference with `prefers-color-scheme`.
+- Lagos/WAT timestamps via `Africa/Lagos`.
+- Welcome/navigation landing page after login; no autofocus so mobile keyboards do not open unexpectedly.
+- Ticket review confirmation before any ticket is issued.
+- 12-character random public ticket codes (`OW-XXXXXXXXXXXX`) instead of sequential IDs.
+- QR codes contain the public ticket code, not the database sequence ID.
+- Full-screen scan result layer with explicit acknowledgement.
+- Distinct valid tone vs invalid/already-used buzzing tone using the browser Web Audio API.
+- Two-ticket quick recent-sales view.
+- Every seller/admin can search every ticket and download its QR code.
+- Global totals plus each user's personal totals.
+- Admin-only seller removal/restore while retaining seller history.
+- Admin-only ticket pricing controls; old tickets retain their recorded price.
+- Admin-only developer/failsafe ticket-history reset that preserves users.
+- Footer attribution: Powered by Oma.
 
-## Local development
-```
-pip install -r requirements.txt
-export DATABASE_URL=postgresql://user:pass@localhost:5432/owambe
-export DB_SSLMODE=disable   # only needed for a local, non-SSL Postgres
-python app.py
-```
+## Deployment
 
-## Default login
-Username: `admin` / Password: `admin123` — **change this immediately** via
-the Change Password page once deployed, or by registering a new admin and
-retiring the default account.
-
-## What's in here
-- Login (admin/seller roles)
-- Sell tickets → auto QR code (generated on the fly, never written to disk —
-  this is what makes it safe on Render's ephemeral filesystem)
-- Door check-in via QR scan, manual ticket ID, or guest WhatsApp number
-- Downloadable QR for any ticket, any time, from the All Tickets page
-- Sales report by seller (admin only)
-- Self-service password change for any logged-in user
-- CSV export of all tickets
-
-## Notes on the Postgres migration
-- Tables are created automatically on first boot (`CREATE TABLE IF NOT EXISTS`),
-  so you don't need to run any migration script — just set `DATABASE_URL` and deploy.
-- If you were previously on SQLite and want your old ticket data, you'd need to
-  export it from `tickets.db` and re-insert it into Postgres manually — there's
-  no automatic import here, since a Render SQLite file is likely already gone
-  by the time you're reading this.
+Set `DATABASE_URL`, `SECRET_KEY`, and (if needed) `DB_SSLMODE` in the deployment environment. The app creates/updates its PostgreSQL tables on boot.
