@@ -299,3 +299,41 @@ td strong { color:var(--cyan); }
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* Ticket Actions in Table */
+.ticket-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.small-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+    min-height: 32px;
+    width: auto;
+    margin: 0;
+    text-decoration: none;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.small-btn.secondary {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text);
+}
+.danger-button {
+    background: var(--danger);
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+@media (max-width: 720px) {
+    .ticket-actions {
+        flex-direction: column;
+    }
+    .small-btn {
+        width: 100%;
+    }
+}
