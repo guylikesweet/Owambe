@@ -4,15 +4,47 @@
 <div class="issued-page">
 <div class="card ticket-card">
   <div class="success-mark">✓</div><span class="eyebrow">TICKET READY</span><h1>Ticket issued</h1>
-  <div class="ticket-details">
+  
+  <div class="ticket-details" id="ticket-data">
     <div><span>Ticket Code</span><strong>{{ ticket.ticket_code }}</strong></div>
     <div><span>Guest Name</span><strong>{{ ticket.name }}</strong></div>
     <div><span>WhatsApp</span><strong>{{ ticket.whatsapp }}</strong></div>
     <div><span>Amount Paid</span><strong>₦{{ "{:,}".format(ticket.amount_paid) }}</strong></div>
+    <div><span>Event</span><strong>{{ event_name }}</strong></div>
+    <div><span>Status</span><strong>{{ ticket.status or 'Valid' }}</strong></div>
   </div>
+
   <div class="qr-box"><img src="{{ url_for('qr_image', ticket_code=ticket.ticket_code) }}" width="220" height="220" alt="Ticket QR code"></div>
+  
   <a href="{{ url_for('qr_image', ticket_code=ticket.ticket_code) }}" download="owambe_{{ ticket.ticket_code }}.png" class="btn secondary">Download QR Code</a>
+
+  <!-- NEW BUTTONS -->
+  <div class="stack-actions" style="margin-top:12px">
+    <button class="btn" onclick="handleTicketAction('wa')">Send Ticket via WhatsApp</button>
+    <button class="btn secondary" onclick="handleTicketAction('download')">Download Ticket PDF</button>
+  </div>
+
   <p class="muted small center">Send this QR code to the guest. Any seller can find the ticket again from All Tickets.</p>
   <div class="stack-actions"><a href="{{ url_for('sell') }}" class="btn">Sell Another Ticket</a><a href="{{ url_for('home') }}" class="btn secondary">Back Home</a></div>
 </div></div>
+
+<script>
+// Build ticket object from template and call pdf_generator.js
+const currentTicket = {
+    ticket_id: "{{ ticket.ticket_code }}",
+    event_name: "{{ event_name }}",
+    guest_name: "{{ ticket.name }}",
+    phone: "{{ ticket.whatsapp }}",
+    amount: "{{ "{:,}".format(ticket.amount_paid) }}",
+    status: "{{ ticket.status or 'Valid' }}"
+};
+
+function handleTicketAction(action) {
+    if(action === 'download') {
+        downloadTicket(currentTicket);
+    } else {
+        sendTicketViaWhatsApp(currentTicket);
+    }
+}
+</script>
 {% endblock %}
