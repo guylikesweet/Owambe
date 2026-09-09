@@ -58,10 +58,27 @@ function showResult(data) {
   titleBox.textContent = data.status;
   titleBox.className = 'status-title ' + (isValid ? 'valid' : 'invalid');
   messageBox.textContent = data.msg || '';
-  guestBox.innerHTML = data.name ? `<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div><div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div><div><span>Ticket</span><strong>${escapeHtml(data.ticket_code || '')}</strong></div>` : '';
-  handleButton.textContent = isValid ? 'OKAY' : 'HANDLED IT';
+
+  if (isMultiple && Array.isArray(data.matches)) {
+    // Several tickets share this WhatsApp number — let the gate staff pick the right guest
+    // instead of silently checking nobody in.
+    guestBox.innerHTML = data.matches.map(m => `
+      <button type="button" class="btn secondary match-pick" data-code="${escapeHtml(m.ticket_code)}" style="margin-top:0;">
+        ${escapeHtml(m.name)}${m.used ? ' — already checked in' : ''}
+      </button>
+    `).join('');
+    guestBox.style.gridTemplateColumns = '1fr';
+    guestBox.querySelectorAll('.match-pick').forEach(btn => {
+      btn.addEventListener('click', () => checkTicket(btn.dataset.code));
+    });
+  } else {
+    guestBox.style.gridTemplateColumns = '';
+    guestBox.innerHTML = data.name ? `<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div><div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div><div><span>Ticket</span><strong>${escapeHtml(data.ticket_code || '')}</strong></div>` : '';
+  }
+
+  handleButton.textContent = isValid ? 'OKAY' : (isMultiple ? 'CANCEL' : 'HANDLED IT');
   handleButton.className = 'btn ' + (isValid ? '' : 'danger-button');
-  if (isValid) playTone('valid'); else playTone('invalid');
+  if (isValid) playTone('valid'); else if (!isMultiple) playTone('invalid');
   overlay.hidden = false;
   document.body.classList.add('modal-open');
   if (!isMultiple) canScan = false;
