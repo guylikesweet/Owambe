@@ -3,29 +3,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b1f2b">
 <title>{% block title %}{{ event_name }}{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<div class="wrap{% block wrapclass %}{% endblock %}">
-  {% block header %}
-  <div class="brand">
-    <div class="crest">BE</div>
-    <div class="event-name">{{ event_name }}</div>
-    <div class="tagline">{% block tagline %}Ticketing &amp; Guest Check-in{% endblock %}</div>
-  </div>
-  <div class="divider"></div>
-  {% endblock %}
+<div class="site-shell">
+  <header class="site-header">
+    <a href="{{ url_for('home') }}" class="brand-lockup" aria-label="Owambe home">
+      <img src="{{ url_for('static', filename='img/owambe-logo.png') }}" alt="Owambe logo">
+    </a>
+    <div class="header-copy">
+      <span class="event-kicker">BE OWAMBE · CLASS OF 2026</span>
+      <span class="event-tagline">Experience and Award Ceremony</span>
+    </div>
+  </header>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
+      <div class="flash-stack">
       {% for category, m in messages %}
         <div class="flash{{ ' success' if category == 'success' else '' }}">{{ m }}</div>
       {% endfor %}
+      </div>
     {% endif %}
   {% endwith %}
 
-  {% block content %}{% endblock %}
+  <main class="page-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">Powered by <strong>Oma</strong></footer>
 </div>
 </body>
 </html>

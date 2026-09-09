@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Welcome {{ user.username }} · {{ event_name }}{% endblock %}
+{% block content %}
+<section class="welcome-block">
+  <div>
+    <span class="eyebrow">TICKET DESK</span>
+    <h1>Welcome, {{ user.username }}!</h1>
+    <p>What would you like to do?</p>
+  </div>
+  <span class="role-chip">{{ user.role|upper }}</span>
+</section>
+
+<section class="stats-grid stats-grid-3">
+  <div class="stat-card"><span class="stat-value">{{ overall.sold }}</span><span class="stat-label">Overall tickets sold</span></div>
+  <div class="stat-card"><span class="stat-value">{{ overall.used }}</span><span class="stat-label">Overall checked in</span></div>
+  <div class="stat-card"><span class="stat-value">₦{{ "{:,}".format(overall.cash) }}</span><span class="stat-label">Overall cash</span></div>
+</section>
+
+<section class="stats-grid stats-grid-3 personal-stats">
+  <div class="stat-card compact"><span class="stat-value">{{ mine.sold }}</span><span class="stat-label">Your tickets sold</span></div>
+  <div class="stat-card compact"><span class="stat-value">{{ mine.used }}</span><span class="stat-label">Your check-ins</span></div>
+  <div class="stat-card compact"><span class="stat-value">₦{{ "{:,}".format(mine.cash) }}</span><span class="stat-label">Your sales value</span></div>
+</section>
+
+<nav class="action-grid" aria-label="Ticket desk actions">
+  <a class="action-card primary-action" href="{{ url_for('sell') }}"><span class="action-icon">＋</span><span><strong>Sell a ticket</strong><small>Enter guest details and issue a QR</small></span></a>
+  <a class="action-card" href="{{ url_for('scan') }}"><span class="action-icon">⌁</span><span><strong>Scan / check in</strong><small>Validate a QR, ticket code or WhatsApp</small></span></a>
+  <a class="action-card" href="{{ url_for('all_tickets') }}"><span class="action-icon">▦</span><span><strong>All tickets</strong><small>Search every ticket and download its QR</small></span></a>
+  {% if user.role == 'admin' %}
+  <a class="action-card" href="{{ url_for('report') }}"><span class="action-icon">◫</span><span><strong>Admin controls</strong><small>Sellers, pricing, totals and reset tools</small></span></a>
+  {% endif %}
+  <a class="action-card" href="{{ url_for('change_password') }}"><span class="action-icon">⚿</span><span><strong>Change password</strong><small>Update your sign-in credentials</small></span></a>
+  <a class="action-card" href="{{ url_for('logout') }}"><span class="action-icon">↪</span><span><strong>Log out</strong><small>End this ticket desk session</small></span></a>
+</nav>
+{% endblock %}

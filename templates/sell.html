@@ -1,76 +1,69 @@
 {% extends "base.html" %}
 {% block title %}Sell Tickets · {{ event_name }}{% endblock %}
-{% block tagline %}Ticket Desk — {{ user.username }} ({{ user.role }}){% endblock %}
-{% block wrapclass %} wide{% endblock %}
-
 {% block content %}
-<div class="stats">
-  <div class="stat"><span class="num">{{ total_sold }}</span><span class="label">Sold</span></div>
-  <div class="stat"><span class="num">₦{{ "{:,}".format(total_cash) }}</span><span class="label">Cash In</span></div>
-  <div class="stat"><span class="num">{{ total_used }}</span><span class="label">Checked In</span></div>
+<div class="page-heading">
+  <div><span class="eyebrow">TICKET SALES</span><h1>Issue a ticket</h1><p>Current ticket price: <strong>₦{{ "{:,}".format(price) }}</strong></p></div>
+  <a href="{{ url_for('home') }}" class="btn secondary">Home</a>
 </div>
 
-<div class="card" style="max-width:480px; margin: 22px auto 0;">
-  <h2 style="text-align:center;">Issue a Ticket</h2>
-  <form method="post">
-    <label for="name">Guest Name</label>
-    <input type="text" id="name" name="name" placeholder="e.g. Ibrahim Bolanle" required autofocus>
+<section class="stats-grid stats-grid-3">
+  <div class="stat-card"><span class="stat-value">{{ overall.sold }}</span><span class="stat-label">Overall sold</span></div>
+  <div class="stat-card"><span class="stat-value">{{ overall.used }}</span><span class="stat-label">Overall checked in</span></div>
+  <div class="stat-card"><span class="stat-value">{{ mine.sold }}</span><span class="stat-label">Your sales</span></div>
+</section>
 
+<div class="card form-card">
+  <form id="issue-form" method="post">
+    <label for="name">Guest Name</label>
+    <input type="text" id="name" name="name" placeholder="e.g. Ibrahim Bolanle" required>
     <label for="whatsapp">WhatsApp Number</label>
     <input type="tel" id="whatsapp" name="whatsapp" placeholder="e.g. 08012345678" required>
-
     <label>Amount</label>
-    <input type="text" value="₦{{ '{:,}'.format(price) }}" disabled>
-
-    <button type="submit">Issue Ticket &amp; Generate QR</button>
+    <input type="text" value="₦{{ "{:,}".format(price) }}" disabled>
+    <button type="submit">Review &amp; Issue Ticket</button>
   </form>
 </div>
 
-<div class="toolbar" style="margin-top:34px;">
-  <h3 style="margin:0;">Recently Sold</h3>
-  <div style="display:flex; gap:14px; font-size:14px;">
-    <a href="{{ url_for('scan') }}">Scanner</a>
-    <a href="{{ url_for('all_tickets') }}">All Tickets</a>
-    {% if user.role == 'admin' %}
-      <a href="{{ url_for('report') }}">Report</a>
-    {% endif %}
-    <a href="{{ url_for('change_password') }}">Change Password</a>
-    <a href="{{ url_for('logout') }}">Logout</a>
+<section class="recent-section">
+  <div class="toolbar"><div><span class="eyebrow">QUICK VIEW</span><h2>Recently sold</h2></div><a href="{{ url_for('all_tickets') }}">View all tickets →</a></div>
+  <p class="muted small">Only the two latest tickets are shown here.</p>
+  <div class="ticket-list">
+  {% for t in recent %}
+    <article class="ticket-row">
+      <div><strong>{{ t.ticket_code }}</strong><span>{{ t.name }} · {{ t.whatsapp }}</span></div>
+      <a href="{{ url_for('qr_image', ticket_code=t.ticket_code) }}" download="owambe_{{ t.ticket_code }}.png">Download QR</a>
+    </article>
+  {% else %}<div class="empty-state">No tickets sold yet.</div>{% endfor %}
+  </div>
+</section>
+
+<div id="confirm-modal" class="modal-backdrop" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <span class="eyebrow">CROSS-CHECK BEFORE ISSUING</span>
+    <h2 id="confirm-title">Are these guest details correct?</h2>
+    <div class="review-grid">
+      <div><span>Guest name</span><strong id="review-name"></strong></div>
+      <div><span>WhatsApp</span><strong id="review-whatsapp"></strong></div>
+      <div><span>Amount</span><strong>₦{{ "{:,}".format(price) }}</strong></div>
+    </div>
+    <p class="muted small">Nothing will be issued until you confirm.</p>
+    <div class="modal-actions"><button type="button" class="btn secondary" id="cancel-review">Go back</button><button type="button" class="btn" id="confirm-review">I'M SURE</button></div>
   </div>
 </div>
-
-<table>
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>Name</th>
-      <th>WhatsApp</th>
-      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}
-      <th>Status</th>
-      <th>QR</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for t in recent %}
-    <tr>
-      <td data-label="ID">{{ t.id }}</td>
-      <td data-label="Name">{{ t.name }}</td>
-      <td data-label="WhatsApp">{{ t.whatsapp }}</td>
-      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}
-      <td data-label="Status">
-        {% if t.used %}
-          <span class="badge used">Checked In</span>
-        {% else %}
-          <span class="badge valid">Not Yet</span>
-        {% endif %}
-      </td>
-      <td data-label="QR">
-        <a href="{{ url_for('qr_image', ticket_id=t.id) }}" download="owambe_ticket_{{ t.id }}.png">Download</a>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="{% if user.role == 'admin' %}6{% else %}5{% endif %}" style="color:var(--muted);">No tickets sold yet.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<script>
+const issueForm = document.getElementById('issue-form');
+const confirmModal = document.getElementById('confirm-modal');
+const nameInput = document.getElementById('name');
+const whatsappInput = document.getElementById('whatsapp');
+issueForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!issueForm.reportValidity()) return;
+  document.getElementById('review-name').textContent = nameInput.value.trim();
+  document.getElementById('review-whatsapp').textContent = whatsappInput.value.trim();
+  confirmModal.hidden = false;
+  document.body.classList.add('modal-open');
+});
+document.getElementById('cancel-review').addEventListener('click', () => { confirmModal.hidden = true; document.body.classList.remove('modal-open'); });
+document.getElementById('confirm-review').addEventListener('click', () => { issueForm.submit(); });
+</script>
 {% endblock %}

@@ -1,61 +1,15 @@
 {% extends "base.html" %}
 {% block title %}All Tickets · {{ event_name }}{% endblock %}
-{% block tagline %}All Tickets{% endblock %}
-{% block wrapclass %} wide{% endblock %}
-
 {% block content %}
+<div class="page-heading"><div><span class="eyebrow">TICKET CATALOGUE</span><h1>All tickets</h1><p>Search across every ticket, no matter who sold it.</p></div><a href="{{ url_for('home') }}" class="btn secondary">Home</a></div>
 <form class="search-bar" method="get">
-  <input type="text" name="q" value="{{ q }}" placeholder="Search by name, WhatsApp, or ticket ID">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search name, WhatsApp, ticket code or ID">
   <button type="submit">Search</button>
 </form>
-
-<div class="toolbar" style="margin-bottom:14px;">
-  <span style="color:var(--muted); font-size:14px;">{{ tickets|length }} ticket{{ 's' if tickets|length != 1 else '' }}</span>
-  <div style="display:flex; gap:14px; font-size:14px;">
-    <a href="{{ url_for('export_csv') }}">Export CSV</a>
-    <a href="{{ url_for('sell') }}">Ticket Desk</a>
-    <a href="{{ url_for('scan') }}">Scanner</a>
-    {% if user.role == 'admin' %}
-      <a href="{{ url_for('report') }}">Report</a>
-    {% endif %}
-    <a href="{{ url_for('change_password') }}">Change Password</a>
-  </div>
-</div>
-
-<table>
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>Name</th>
-      <th>WhatsApp</th>
-      {% if user.role == 'admin' %}<th>Sold By</th>{% endif %}
-      <th>Sold</th>
-      <th>Status</th>
-      <th>QR</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for t in tickets %}
-    <tr>
-      <td data-label="ID">{{ t.id }}</td>
-      <td data-label="Name">{{ t.name }}</td>
-      <td data-label="WhatsApp">{{ t.whatsapp }}</td>
-      {% if user.role == 'admin' %}<td data-label="Sold By">{{ t.username }}</td>{% endif %}
-      <td data-label="Sold">{{ t.created_at }}</td>
-      <td data-label="Status">
-        {% if t.used %}
-          <span class="badge used">Checked In {{ t.used_at }}</span>
-        {% else %}
-          <span class="badge valid">Not Yet</span>
-        {% endif %}
-      </td>
-      <td data-label="QR">
-        <a href="{{ url_for('qr_image', ticket_id=t.id) }}" download="owambe_ticket_{{ t.id }}.png">Download</a>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="{% if user.role == 'admin' %}7{% else %}6{% endif %}" style="color:var(--muted);">No tickets match.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="toolbar result-toolbar"><span class="muted small">{{ tickets|length }} result{{ 's' if tickets|length != 1 else '' }}</span><div><a href="{{ url_for('scan') }}">Scanner</a>{% if user.role == 'admin' %} · <a href="{{ url_for('export_csv') }}">Export CSV</a>{% endif %}</div></div>
+<div class="table-wrap"><table><thead><tr><th>Ticket Code</th><th>Name</th><th>WhatsApp</th><th>Sold By</th><th>Sold</th><th>Status</th><th>QR</th></tr></thead><tbody>
+{% for t in tickets %}
+<tr><td data-label="Ticket Code"><strong>{{ t.ticket_code }}</strong></td><td data-label="Name">{{ t.name }}</td><td data-label="WhatsApp">{{ t.whatsapp }}</td><td data-label="Sold By">{{ t.username or 'Unknown / removed' }}</td><td data-label="Sold">{{ t.created_at }} WAT</td><td data-label="Status">{% if t.used %}<span class="badge used">Checked In</span>{% else %}<span class="badge valid">Not Yet</span>{% endif %}</td><td data-label="QR"><a href="{{ url_for('qr_image', ticket_code=t.ticket_code) }}" download="owambe_{{ t.ticket_code }}.png">Download</a></td></tr>
+{% else %}<tr><td colspan="7" class="empty-cell">No tickets match.</td></tr>{% endfor %}
+</tbody></table></div>
 {% endblock %}

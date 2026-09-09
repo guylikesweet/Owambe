@@ -1,138 +1,99 @@
 {% extends "base.html" %}
-{% block title %}Scan Tickets · {{ event_name }}{% endblock %}
-{% block tagline %}Door Check-in{% endblock %}
-
+{% block title %}Scanner · {{ event_name }}{% endblock %}
 {% block content %}
-<div class="card">
-  <h2 style="text-align:center;">Scan Ticket</h2>
-  <p class="scan-hint" style="margin-top:0;">Point camera at QR, or type the ticket ID or guest WhatsApp number and press Enter.</p>
-
-  <!-- CAMERA BOX -->
-  <div id="reader" style="width:100%; max-width:400px; margin:20px auto; border:3px solid var(--gold); border-radius:12px; overflow:hidden;"></div>
-
-  <form id="scan-form" autocomplete="off" onsubmit="return false;">
-    <input type="text" id="scanner-input" placeholder="Scan QR, or type ticket ID / WhatsApp number" autofocus>
-  </form>
-
-  <div id="scan-result"></div>
-
-  <a href="{{ url_for('sell') }}" class="btn secondary" style="margin-top:26px;">Back to Ticket Desk</a>
+<div class="page-heading"><div><span class="eyebrow">DOOR CHECK-IN</span><h1>Scan ticket</h1><p>Point the camera at a QR code, or type a ticket code / WhatsApp number.</p></div><a href="{{ url_for('home') }}" class="btn secondary">Home</a></div>
+<div class="card scanner-card">
+  <div id="reader"></div>
+  <form id="scan-form" autocomplete="off" onsubmit="return false;"><input type="text" id="scanner-input" placeholder="Ticket code or WhatsApp number"></form>
+  <p class="scan-note">The result will appear as a full-screen confirmation layer. The scanner can only continue after you acknowledge it.</p>
 </div>
 
-<!-- BEEP SOUND -->
-<audio id="beepSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+<div id="scan-overlay" class="scan-overlay" hidden>
+  <div class="scan-result-card" role="dialog" aria-modal="true" aria-labelledby="scan-status-title">
+    <div id="scan-status-icon" class="status-icon"></div>
+    <span id="scan-status-title" class="status-title"></span>
+    <p id="scan-status-message" class="status-message"></p>
+    <div id="scan-guest" class="scan-guest"></div>
+    <button id="scan-handle" class="btn" type="button">OKAY</button>
+  </div>
+</div>
 
-<!-- QR SCANNER LIBRARY -->
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-
 <script>
 const input = document.getElementById('scanner-input');
-const resultBox = document.getElementById('scan-result');
-const beep = document.getElementById('beepSound');
-let canScan = true; // prevent scanning same QR 10 times
+const overlay = document.getElementById('scan-overlay');
+const iconBox = document.getElementById('scan-status-icon');
+const titleBox = document.getElementById('scan-status-title');
+const messageBox = document.getElementById('scan-status-message');
+const guestBox = document.getElementById('scan-guest');
+const handleButton = document.getElementById('scan-handle');
+let canScan = true;
+let activeResult = null;
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
+function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str || ''; return div.innerHTML; }
+
+function playTone(kind) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  const ctx = new AudioCtx();
+  const now = ctx.currentTime;
+  if (kind === 'valid') {
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.frequency.setValueAtTime(880, now); osc.frequency.setValueAtTime(1175, now + 0.09);
+    gain.gain.setValueAtTime(0.001, now); gain.gain.exponentialRampToValueAtTime(0.18, now + 0.01); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc.connect(gain); gain.connect(ctx.destination); osc.start(now); osc.stop(now + 0.23);
+  } else {
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(210, now); osc.frequency.setValueAtTime(130, now + 0.18);
+    gain.gain.setValueAtTime(0.001, now); gain.gain.exponentialRampToValueAtTime(0.24, now + 0.01); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+    osc.connect(gain); gain.connect(ctx.destination); osc.start(now); osc.stop(now + 0.43);
+  }
 }
 
-function renderResult(data) {
-  beep.play(); // BEEP when result comes back
-
-  if (data.status === 'MULTIPLE') {
-    const rows = data.matches.map(m => `
-      <button type="button" class="btn secondary match-btn" data-id="${m.id}" style="margin-top:8px; text-align:left;">
-        ${escapeHtml(m.name)} ${m.used ? '— already checked in' : ''}
-      </button>
-    `).join('');
-
-    resultBox.innerHTML = `
-      <div class="status-block">
-        <div class="status-icon">👥</div>
-        <div class="status-title used">MULTIPLE MATCHES</div>
-        <p style="color:var(--muted); font-size:14px;">${escapeHtml(data.msg)}</p>
-      </div>
-      ${rows}
-    `;
-
-    resultBox.querySelectorAll('.match-btn').forEach(btn => {
-      btn.addEventListener('click', () => checkTicket(btn.dataset.id));
-    });
-    return;
-  }
-
-  let cls = 'invalid';
-  let icon = '❌';
-  if (data.status === 'VALID') { cls = 'valid'; icon = '✅'; }
-  else if (data.status === 'ALREADY USED') { cls = 'used'; icon = '⚠️'; }
-
-  let guestInfo = '';
-  if (data.name) {
-    guestInfo = `
-      <div class="ticket-details">
-        <div class="field"><span class="k">Guest Name</span><div class="v">${escapeHtml(data.name)}</div></div>
-        <div class="field"><span class="k">WhatsApp</span><div class="v">${escapeHtml(data.whatsapp)}</div></div>
-      </div>`;
-  }
-
-  resultBox.innerHTML = `
-    <div class="status-block">
-      <div class="status-icon">${icon}</div>
-      <div class="status-title ${cls}">${data.status}</div>
-      <p style="color:var(--muted); font-size:14px;">${escapeHtml(data.msg)}</p>
-    </div>
-    ${guestInfo}
-  `;
-
-  // cooldown 2.5s
-  canScan = false;
-  setTimeout(() => { canScan = true; }, 2500);
+function showResult(data) {
+  activeResult = data;
+  const isValid = data.status === 'VALID';
+  const isMultiple = data.status === 'MULTIPLE';
+  iconBox.textContent = isValid ? '✓' : (isMultiple ? '!' : '×');
+  titleBox.textContent = data.status;
+  titleBox.className = 'status-title ' + (isValid ? 'valid' : 'invalid');
+  messageBox.textContent = data.msg || '';
+  guestBox.innerHTML = data.name ? `<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div><div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div><div><span>Ticket</span><strong>${escapeHtml(data.ticket_code || '')}</strong></div>` : '';
+  handleButton.textContent = isValid ? 'OKAY' : 'HANDLED IT';
+  handleButton.className = 'btn ' + (isValid ? '' : 'danger-button');
+  if (isValid) playTone('valid'); else playTone('invalid');
+  overlay.hidden = false;
+  document.body.classList.add('modal-open');
+  if (!isMultiple) canScan = false;
 }
 
 async function checkTicket(value) {
-  if (!value) return;
+  if (!value || !canScan) return;
   value = value.trim();
-
-  // Handle a full URL from the QR code (works regardless of which path it uses)
-  if (value.includes('://')) {
-    const parts = value.replace(/\/+$/, '').split('/');
-    value = parts[parts.length - 1];
-  }
-
-  const formData = new FormData();
-  formData.append('data', value);
-
+  const formData = new FormData(); formData.append('data', value);
   try {
-    const res = await fetch("{{ url_for('check_ticket') }}", { method: 'POST', body: formData });
+    const res = await fetch("{{ url_for('check_ticket') }}", {method:'POST', body:formData});
     const data = await res.json();
-    renderResult(data);
+    showResult(data);
   } catch (err) {
-    resultBox.innerHTML = `<div class="status-block"><div class="status-title invalid">ERROR</div><p style="color:var(--muted);">Could not reach the server.</p></div>`;
+    showResult({status:'ERROR', msg:'Could not reach the server.'});
   }
+  input.value = '';
+}
 
+handleButton.addEventListener('click', () => {
+  overlay.hidden = true;
+  document.body.classList.remove('modal-open');
+  activeResult = null;
+  canScan = true;
   input.value = '';
   input.focus();
-}
-
-// MANUAL INPUT
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    checkTicket(input.value.trim());
-  }
 });
 
-// CAMERA SCANNER
-function onScanSuccess(decodedText) {
-  if(!canScan) return;
-  checkTicket(decodedText);
-}
+input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkTicket(input.value); } });
 
-let html5QrcodeScanner = new Html5QrcodeScanner(
-  "reader",
-  { fps: 10, qrbox: {width: 250, height: 250} }
-);
+function onScanSuccess(decodedText) { if (!canScan) return; checkTicket(decodedText); }
+let html5QrcodeScanner = new Html5QrcodeScanner('reader', {fps:10, qrbox:{width:250,height:250}}, false);
 html5QrcodeScanner.render(onScanSuccess);
 </script>
 {% endblock %}

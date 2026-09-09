@@ -1,27 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Add Seller · {{ event_name }}{% endblock %}
-{% block tagline %}Add New Seller — admin only{% endblock %}
-
+{% block title %}Add User · {{ event_name }}{% endblock %}
 {% block content %}
-<div class="card">
-  <h2 style="text-align:center;">Add New Seller</h2>
-
-  <form method="post">
-    <label for="username">Username</label>
-    <input type="text" id="username" name="username" required placeholder="e.g. john">
-
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" required placeholder="Set a password">
-
-    <label for="role">Role</label>
-    <select id="role" name="role">
-      <option value="seller">Seller</option>
-      <option value="admin">Admin</option>
-    </select>
-
-    <button type="submit">Create User</button>
-  </form>
-
-  <a href="{{ url_for('report') }}" class="btn secondary" style="margin-top:12px;">Back to Report</a>
-</div>
+<div class="auth-page"><div class="card auth-card"><span class="eyebrow">ADMIN ONLY</span><h1>Add user</h1>
+<form method="post">
+<label for="username">Username</label><input type="text" id="username" name="username" required placeholder="e.g. john">
+<label for="password">Password</label><input type="password" id="password" name="password" required minlength="6" placeholder="Set a password">
+<label for="role">Role</label><select id="role" name="role"><option value="seller">Seller</option><option value="admin">Admin</option></select>
+<button type="submit">Create User</button>
+</form><a href="{{ url_for('report') }}" class="btn secondary">Back to Admin Controls</a></div></div>
 {% endblock %}
