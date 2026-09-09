@@ -31,7 +31,6 @@ DEFAULT_TICKET_PRICE = 3500
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 TICKET_ALPHABET = string.ascii_uppercase + string.digits
 
-
 # Lightweight CSRF protection for all state-changing form/API requests.
 def csrf_token():
     token = session.get("csrf_token")
@@ -49,9 +48,7 @@ def protect_requests():
             abort(400, description="Invalid or missing CSRF token")
 
 def generate_ticket_code():
-    # Non-sequential, case-insensitive-safe code with enough entropy to resist guessing.
     return "OW-" + "".join(secrets.choice(TICKET_ALPHABET) for _ in range(12))
-
 
 def unique_ticket_code():
     code = generate_ticket_code()
@@ -59,36 +56,25 @@ def unique_ticket_code():
         code = generate_ticket_code()
     return code
 
-
-
-
 def lagos_now():
     return datetime.now(LAGOS_TZ)
 
-
 def lagos_timestamp():
     return lagos_now().strftime("%Y-%m-%d %H:%M:%S")
-
 
 # ------------------ DB HELPERS ------------------
 def get_db():
     if "db" not in g:
         if not DATABASE_URL:
             raise RuntimeError("DATABASE_URL is not configured.")
-        g.db = psycopg2.connect(
-            DATABASE_URL,
-            sslmode=SSL_MODE,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-        )
+        g.db = psycopg2.connect(DATABASE_URL, sslmode=SSL_MODE, cursor_factory=psycopg2.extras.RealDictCursor)
     return g.db
-
 
 @app.teardown_appcontext
 def close_db(exception=None):
     db = g.pop("db", None)
     if db is not None:
         db.close()
-
 
 def query(sql, params=()):
     db = get_db()
@@ -100,55 +86,17 @@ def query(sql, params=()):
         raise
     return cur
 
-
 def init_db():
     db = get_db()
-    query("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT DEFAULT 'seller',
-            active BOOLEAN NOT NULL DEFAULT TRUE
-        )
-    """)
-    query("""
-        CREATE TABLE IF NOT EXISTS tickets (
-            id SERIAL PRIMARY KEY,
-            ticket_code TEXT UNIQUE,
-            name TEXT NOT NULL,
-            whatsapp TEXT NOT NULL,
-            used BOOLEAN DEFAULT FALSE,
-            created_at TEXT,
-            used_at TEXT,
-            sold_by INTEGER REFERENCES users (id),
-            amount_paid INTEGER NOT NULL DEFAULT 3500,
-            qr_data TEXT
-        )
-    """)
-    query("""
-        CREATE TABLE IF NOT EXISTS app_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-    """)
-    query("""
-        CREATE TABLE IF NOT EXISTS ticket_audit (
-            id SERIAL PRIMARY KEY,
-            ticket_id INTEGER NOT NULL REFERENCES tickets (id),
-            action TEXT NOT NULL,
-            performed_by INTEGER REFERENCES users (id),
-            detail TEXT,
-            created_at TEXT
-        )
-    """)
+    query("""CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'seller', active BOOLEAN NOT NULL DEFAULT TRUE)""")
+    query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
+    query("""CREATE TABLE IF NOT EXISTS ticket_audit (id SERIAL PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets (id), action TEXT NOT NULL, performed_by INTEGER REFERENCES users (id), detail TEXT, created_at TEXT)""")
 
-    # Safe upgrades for installations created by earlier versions.
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
     query("CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ticket_code ON tickets(ticket_code)")
-    # Cancellation / refund workflow — every change here is also written to ticket_audit.
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled_at TEXT")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled_by INTEGER REFERENCES users(id)")
@@ -157,38 +105,23 @@ def init_db():
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refund_amount INTEGER")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded_at TEXT")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded_by INTEGER REFERENCES users(id)")
-    # Resend tracking, so staff can see whether/when a ticket was last (re)sent.
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_sent_at TEXT")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS send_count INTEGER NOT NULL DEFAULT 0")
 
-    # Any legacy ticket without a code gets a secure code before the code is used operationally.
     missing = query("SELECT id FROM tickets WHERE ticket_code IS NULL OR ticket_code = ''").fetchall()
     for row in missing:
         code = generate_ticket_code()
         while query("SELECT 1 FROM tickets WHERE ticket_code = %s", (code,)).fetchone():
             code = generate_ticket_code()
         query("UPDATE tickets SET ticket_code = %s WHERE id = %s", (code, row["id"]))
-
-    # Store the QR payload in PostgreSQL rather than storing QR image files on disk.
-    # The payload is the unpredictable public ticket code; the PNG is generated on demand.
     query("UPDATE tickets SET qr_data = ticket_code WHERE qr_data IS NULL OR qr_data = ''")
-
-    # Preserve the historical default price, but make it editable without a code deploy.
-    query("""
-        INSERT INTO app_settings (key, value) VALUES ('ticket_price', %s)
-        ON CONFLICT (key) DO NOTHING
-    """, (str(DEFAULT_TICKET_PRICE),))
+    query("INSERT INTO app_settings (key, value) VALUES ('ticket_price', %s) ON CONFLICT (key) DO NOTHING", (str(DEFAULT_TICKET_PRICE),))
     db.commit()
-
     user = query("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
     if not user:
-        query(
-            "INSERT INTO users (username, password_hash, role, active) VALUES (%s,%s,%s,%s)",
-            ("admin", generate_password_hash("admin123"), "admin", True),
-        )
+        query("INSERT INTO users (username, password_hash, role, active) VALUES (%s,%s,%s,%s)", ("admin", generate_password_hash("admin123"), "admin", True))
         db.commit()
         print("Default admin created: admin / admin123")
-
 
 def get_ticket_price():
     row = query("SELECT value FROM app_settings WHERE key = 'ticket_price'").fetchone()
@@ -197,29 +130,16 @@ def get_ticket_price():
     except (TypeError, ValueError):
         return DEFAULT_TICKET_PRICE
 
-
 def log_audit(ticket_id, action, performed_by, detail=""):
-    # Caller is responsible for committing, so this can share a transaction
-    # with whatever ticket UPDATE it is recording alongside.
-    query(
-        "INSERT INTO ticket_audit (ticket_id, action, performed_by, detail, created_at) VALUES (%s,%s,%s,%s,%s)",
-        (ticket_id, action, performed_by, detail, lagos_timestamp()),
-    )
-
+    query("INSERT INTO ticket_audit (ticket_id, action, performed_by, detail, created_at) VALUES (%s,%s,%s,%s,%s)", (ticket_id, action, performed_by, detail, lagos_timestamp()))
 
 def get_ticket_or_404(ticket_id):
-    ticket = query(
-        "SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s",
-        (ticket_id,),
-    ).fetchone()
+    ticket = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s", (ticket_id,)).fetchone()
     if not ticket:
         abort(404)
     return ticket
 
-
 def whatsapp_dial_number(raw):
-    # Best-effort conversion of a locally-entered Nigerian number into the
-    # international, no-plus format wa.me expects (e.g. 0801... -> 234801...).
     digits = re.sub(r"\D", "", raw or "")
     if digits.startswith("234"):
         return digits
@@ -229,24 +149,18 @@ def whatsapp_dial_number(raw):
         return "234" + digits
     return digits
 
-
 def build_ticket_pdf(ticket):
-    # A pocket-sized (105 x 170mm) printable/shareable ticket: event header,
-    # QR code, guest details, and a CANCELLED stamp when applicable.
     width, height = 105 * mm, 170 * mm
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
-
     c.setFillColor(HexColor("#0b1f2b"))
     c.rect(0, 0, width, height, fill=1, stroke=0)
-
     c.setFillColor(HexColor("#42d7e9"))
     c.setFont("Helvetica-Bold", 15)
     c.drawCentredString(width / 2, height - 16 * mm, EVENT_NAME)
     c.setFillColor(HexColor("#f4fbfd"))
     c.setFont("Helvetica", 10)
     c.drawCentredString(width / 2, height - 23 * mm, "Event Ticket")
-
     qr_img = qrcode.make(ticket["qr_data"] or ticket["ticket_code"])
     qr_buf = io.BytesIO()
     qr_img.save(qr_buf, format="PNG")
@@ -255,7 +169,6 @@ def build_ticket_pdf(ticket):
     c.setFillColor(HexColor("#ffffff"))
     c.roundRect((width - qr_size) / 2 - 4 * mm, height - 90 * mm - 4 * mm, qr_size + 8 * mm, qr_size + 8 * mm, 4, fill=1, stroke=0)
     c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, height - 90 * mm, width=qr_size, height=qr_size, mask="auto")
-
     def field(y, label, value):
         c.setFillColor(HexColor("#a8c1c8"))
         c.setFont("Helvetica", 7.5)
@@ -263,13 +176,11 @@ def build_ticket_pdf(ticket):
         c.setFillColor(HexColor("#f4fbfd"))
         c.setFont("Helvetica-Bold", 11)
         c.drawString(10 * mm, y - 5 * mm, str(value)[:40])
-
     y = height - 102 * mm
     field(y, "Ticket Code", ticket["ticket_code"]); y -= 13 * mm
     field(y, "Guest Name", ticket["name"]); y -= 13 * mm
     field(y, "WhatsApp", ticket["whatsapp"]); y -= 13 * mm
     field(y, "Amount Paid", f"NGN {ticket['amount_paid']:,}")
-
     if ticket.get("cancelled"):
         c.saveState()
         c.setFillColor(HexColor("#ed5b63"))
@@ -278,44 +189,37 @@ def build_ticket_pdf(ticket):
         c.rotate(22)
         c.drawCentredString(0, 0, "CANCELLED")
         c.restoreState()
-
     c.setFillColor(HexColor("#a8c1c8"))
     c.setFont("Helvetica", 6.5)
     c.drawCentredString(width / 2, 8 * mm, "Present this ticket (screen or print) with a valid QR at entry.")
-
     c.showPage()
     c.save()
     buf.seek(0)
     return buf
 
-
 with app.app_context():
     init_db()
-
-
 
 def current_user():
     if "user_id" not in session:
         return None
     return query("SELECT * FROM users WHERE id = %s", (session["user_id"],)).fetchone()
 
-
 def original_admin_required(f):
     def wrapper(*args, **kwargs):
         user = current_user()
-        if not user or not user["active"] or user["role"] != "admin":
+        if not user or not user["active"] or user["role"]!= "admin":
             session.clear() if not user or not user["active"] else None
             flash("Only the original administrator can access this feature.", "error")
             return redirect(url_for("home"))
         original = query("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
-        if not original or user["id"] != original["id"]:
+        if not original or user["id"]!= original["id"]:
             flash("Only the original administrator can access this feature.", "error")
             return redirect(url_for("home"))
         g.user = user
         return f(*args, **kwargs)
     wrapper.__name__ = f.__name__
     return wrapper
-
 
 def login_required(role=None):
     def decorator(f):
@@ -326,7 +230,7 @@ def login_required(role=None):
                 if user and not user["active"]:
                     flash("This seller account has been removed. Please contact an administrator.", "error")
                 return redirect(url_for("login"))
-            if role and user["role"] != role:
+            if role and user["role"]!= role:
                 flash("You don't have permission for that page", "error")
                 return redirect(url_for("home"))
             g.user = user
@@ -334,7 +238,6 @@ def login_required(role=None):
         wrapper.__name__ = f.__name__
         return wrapper
     return decorator
-
 
 # ------------------ AUTH ROUTES ------------------
 @app.route("/login", methods=["GET", "POST"])
@@ -353,12 +256,10 @@ def login():
         return render_template("login.html", error=error, event_name=EVENT_NAME)
     return render_template("login.html", event_name=EVENT_NAME)
 
-
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
-
 
 @app.route("/change_password", methods=["GET", "POST"])
 @login_required()
@@ -372,7 +273,7 @@ def change_password():
             flash("Current password is incorrect.", "error")
         elif len(new) < 6:
             flash("New password must be at least 6 characters.", "error")
-        elif new != confirm:
+        elif new!= confirm:
             flash("New password and confirmation don't match.", "error")
         else:
             db = get_db()
@@ -381,7 +282,6 @@ def change_password():
             flash("Password updated.", "success")
             return redirect(url_for("home"))
     return render_template("change_password.html", event_name=EVENT_NAME, user=user)
-
 
 # ------------------ ADMIN ROUTES ------------------
 @app.route("/register", methods=["GET", "POST"])
@@ -396,8 +296,7 @@ def register():
             return render_template("register.html", event_name=EVENT_NAME, user=g.user)
         db = get_db()
         try:
-            query("INSERT INTO users (username, password_hash, role, active) VALUES (%s,%s,%s,%s)",
-                  (username, generate_password_hash(password), role, True))
+            query("INSERT INTO users (username, password_hash, role, active) VALUES (%s,%s,%s,%s)", (username, generate_password_hash(password), role, True))
             db.commit()
             flash(f"User {username} created successfully", "success")
             return redirect(url_for("report"))
@@ -405,7 +304,6 @@ def register():
             db.rollback()
             flash("Username already exists", "error")
     return render_template("register.html", event_name=EVENT_NAME, user=g.user)
-
 
 @app.route("/admin/remove_seller/<int:user_id>", methods=["POST"])
 @login_required(role="admin")
@@ -420,8 +318,6 @@ def remove_seller(user_id):
         get_db().commit()
         flash(f"Seller {seller['username']} was removed. Their records remain available.", "success")
     return redirect(url_for("report"))
-
-
 
 @app.route("/admin/remove_admin/<int:user_id>", methods=["POST"])
 @original_admin_required
@@ -447,7 +343,6 @@ def restore_seller(user_id):
         flash(f"Seller {seller['username']} has been restored.", "success")
     return redirect(url_for("report"))
 
-
 @app.route("/admin/price", methods=["POST"])
 @login_required(role="admin")
 def update_price():
@@ -464,12 +359,11 @@ def update_price():
     flash("Ticket price updated. New sales will use the new price.", "success")
     return redirect(url_for("report"))
 
-
 @app.route("/admin/reset_tickets", methods=["POST"])
 @original_admin_required
 def reset_tickets():
     confirmation = request.form.get("confirmation", "").strip().upper()
-    if confirmation != "RESET":
+    if confirmation!= "RESET":
         flash("Ticket history was not cleared. Type RESET to confirm.", "error")
         return redirect(url_for("report"))
     query("DELETE FROM tickets")
@@ -477,52 +371,23 @@ def reset_tickets():
     flash("All ticket history has been cleared. Users and seller accounts were preserved.", "success")
     return redirect(url_for("report"))
 
-
 @app.route("/report")
 @login_required(role="admin")
 def report():
     price = get_ticket_price()
-    sales = query("""
-        SELECT u.id, u.username, u.role, u.active,
-               COUNT(t.id) AS tickets_sold,
-               COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash,
-               COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used
-        FROM users u
-        LEFT JOIN tickets t ON u.id = t.sold_by
-        GROUP BY u.id
-        ORDER BY u.role, u.active DESC, u.username
-    """).fetchall()
+    sales = query("""SELECT u.id, u.username, u.role, u.active, COUNT(t.id) AS tickets_sold, COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash, COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used FROM users u LEFT JOIN tickets t ON u.id = t.sold_by GROUP BY u.id ORDER BY u.role, u.active DESC, u.username""").fetchall()
     users = query("SELECT id, username, role, active FROM users ORDER BY role, active DESC, username").fetchall()
-    overall = query("""
-        SELECT COUNT(*) AS sold,
-               COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
-        FROM tickets
-    """).fetchone()
-    return render_template("report.html", sales=sales, users=users, overall=overall,
-                           ticket_price=price, event_name=EVENT_NAME, user=g.user)
-
+    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
+    return render_template("report.html", sales=sales, users=users, overall=overall, ticket_price=price, event_name=EVENT_NAME, user=g.user)
 
 # ------------------ MAIN APP ROUTES ------------------
 @app.route("/")
 @login_required()
 def home():
     user = g.user
-    overall = query("""
-        SELECT COUNT(*) AS sold,
-               COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
-        FROM tickets
-    """).fetchone()
-    mine = query("""
-        SELECT COUNT(*) AS sold,
-               COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
-        FROM tickets WHERE sold_by = %s
-    """, (user["id"],)).fetchone()
-    return render_template("home.html", overall=overall, mine=mine, event_name=EVENT_NAME, user=user,
-                           ticket_price=get_ticket_price())
-
+    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
+    mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE sold_by = %s""", (user["id"],)).fetchone()
+    return render_template("home.html", overall=overall, mine=mine, event_name=EVENT_NAME, user=user, ticket_price=get_ticket_price())
 
 @app.route("/sell", methods=["GET", "POST"])
 @login_required()
@@ -537,166 +402,90 @@ def sell():
             return redirect(url_for("sell"))
         created = lagos_timestamp()
         ticket_code = unique_ticket_code()
-        row = query(
-            "INSERT INTO tickets (ticket_code, name, whatsapp, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (ticket_code, name, whatsapp, created, user["id"], price, ticket_code),
-        ).fetchone()
+        row = query("INSERT INTO tickets (ticket_code, name, whatsapp, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id", (ticket_code, name, whatsapp, created, user["id"], price, ticket_code)).fetchone()
         get_db().commit()
         return redirect(url_for("ticket_issued", ticket_id=row["id"]))
-
-    overall = query("""
-        SELECT COUNT(*) AS sold,
-               COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
-        FROM tickets
-    """).fetchone()
-    mine = query("""
-        SELECT COUNT(*) AS sold,
-               COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
-        FROM tickets WHERE sold_by = %s
-    """, (user["id"],)).fetchone()
-    # Deliberately only the two most recent tickets for the quick view.
-    recent = query("""
-        SELECT t.*, u.username FROM tickets t
-        LEFT JOIN users u ON t.sold_by = u.id
-        ORDER BY t.id DESC LIMIT 2
-    """).fetchall()
-    return render_template("sell.html", overall=overall, mine=mine, recent=recent,
-                           price=price, event_name=EVENT_NAME, user=user)
-
+    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
+    mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE sold_by = %s""", (user["id"],)).fetchone()
+    recent = query("""SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC LIMIT 2""").fetchall()
+    return render_template("sell.html", overall=overall, mine=mine, recent=recent, price=price, event_name=EVENT_NAME, user=user)
 
 @app.route("/tickets")
 @login_required()
 def all_tickets():
     q = request.args.get("q", "").strip()
-    # Every seller/admin can search the complete ticket catalogue, regardless of seller.
-    sql = """
-        SELECT t.*, u.username FROM tickets t
-        LEFT JOIN users u ON t.sold_by = u.id
-        WHERE t.name ILIKE %s
-           OR t.whatsapp ILIKE %s
-           OR COALESCE(t.ticket_code,'') ILIKE %s
-           OR t.id::text ILIKE %s
-        ORDER BY t.id DESC
-    """
+    sql = """SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.name ILIKE %s OR t.whatsapp ILIKE %s OR COALESCE(t.ticket_code,'') ILIKE %s OR t.id::text ILIKE %s ORDER BY t.id DESC"""
     like = f"%{q}%"
     tickets = query(sql, (like, like, like, like)).fetchall()
     return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user)
 
+# ------------------ NEW FEATURE ROUTES ------------------
+@app.route("/ticket/<int:ticket_id>/pdf")
+@login_required()
+def ticket_pdf(ticket_id):
+    ticket = get_ticket_or_404(ticket_id)
+    buf = build_ticket_pdf(ticket)
+    return Response(buf.getvalue(), mimetype="application/pdf", headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.pdf"'})
 
-# ------------------ CANCEL / REFUND WORKFLOW ------------------
-# Admin-only: cancelling or refunding reverses money already collected and
-# blocks a ticket at the door, so it is kept out of ordinary seller reach and
-# every step is written to ticket_audit for the record.
-@app.route("/admin/tickets/<int:ticket_id>/cancel", methods=["GET", "POST"])
-@login_required(role="admin")
+@app.route("/t/<path:ticket_code>/pdf")
+@limiter.limit("30 per minute")
+def public_ticket_pdf(ticket_code):
+    ticket = query("SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)).fetchone()
+    if not ticket:
+        abort(404)
+    buf = build_ticket_pdf(ticket)
+    return Response(buf.getvalue(), mimetype="application/pdf", headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.pdf"'})
+
+@app.route("/ticket/<int:ticket_id>/whatsapp")
+@login_required()
+def send_ticket_whatsapp(ticket_id):
+    ticket = get_ticket_or_404(ticket_id)
+    db = get_db()
+    query("UPDATE tickets SET send_count = send_count + 1, last_sent_at = %s WHERE id = %s", (lagos_timestamp(), ticket_id))
+    log_audit(ticket_id, "whatsapp_sent", g.user["id"], f"To {ticket['whatsapp']}")
+    db.commit()
+    link = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
+    message = f"Hi {ticket['name']}, here is your {EVENT_NAME} ticket.\nTicket code: {ticket['ticket_code']}\nDownload your ticket & QR here: {link}\nSee you there!"
+    dial = whatsapp_dial_number(ticket["whatsapp"])
+    wa_url = f"https://wa.me/{dial}?text={urllib.parse.quote(message)}"
+    return redirect(wa_url)
+
+@app.route("/ticket/<int:ticket_id>/cancel", methods=["POST"])
+@login_required()
 def cancel_ticket(ticket_id):
     ticket = get_ticket_or_404(ticket_id)
-
-    if request.method == "POST":
-        if ticket["cancelled"]:
-            flash("This ticket is already cancelled.", "error")
-            return redirect(url_for("all_tickets"))
-
-        reason = request.form.get("reason", "").strip()
-        if not reason:
-            flash("A cancellation reason is required for the record.", "error")
-            return redirect(url_for("cancel_ticket", ticket_id=ticket_id))
-
-        refund = request.form.get("refund") == "on"
-        refund_amount = None
-        if refund:
-            raw_amount = request.form.get("refund_amount", "").replace(",", "").strip()
-            try:
-                refund_amount = int(raw_amount) if raw_amount else ticket["amount_paid"]
-                if refund_amount < 0 or refund_amount > ticket["amount_paid"]:
-                    raise ValueError
-            except ValueError:
-                flash("Enter a valid refund amount (up to the amount paid).", "error")
-                return redirect(url_for("cancel_ticket", ticket_id=ticket_id))
-
-        now = lagos_timestamp()
-        db = get_db()
-        query(
-            "UPDATE tickets SET cancelled = TRUE, cancelled_at = %s, cancelled_by = %s, cancel_reason = %s WHERE id = %s",
-            (now, g.user["id"], reason, ticket_id),
-        )
-        log_audit(ticket_id, "cancelled", g.user["id"], reason)
-        if refund:
-            query(
-                "UPDATE tickets SET refunded = TRUE, refund_amount = %s, refunded_at = %s, refunded_by = %s WHERE id = %s",
-                (refund_amount, now, g.user["id"], ticket_id),
-            )
-            log_audit(ticket_id, "refunded", g.user["id"], f"NGN {refund_amount:,}")
-        db.commit()
-
-        msg = f"Ticket {ticket['ticket_code']} was cancelled."
-        if refund:
-            msg = f"Ticket {ticket['ticket_code']} was cancelled and NGN {refund_amount:,} marked refunded."
-        flash(msg, "success")
-        return redirect(url_for("all_tickets"))
-
-    audit = query(
-        "SELECT a.*, u.username FROM ticket_audit a LEFT JOIN users u ON a.performed_by = u.id "
-        "WHERE a.ticket_id = %s ORDER BY a.id DESC",
-        (ticket_id,),
-    ).fetchall()
-    return render_template("cancel_ticket.html", ticket=ticket, audit=audit, event_name=EVENT_NAME, user=g.user)
-
-
-@app.route("/admin/tickets/<int:ticket_id>/reactivate", methods=["POST"])
-@login_required(role="admin")
-def reactivate_ticket(ticket_id):
-    ticket = get_ticket_or_404(ticket_id)
-    if not ticket["cancelled"]:
-        flash("This ticket isn't cancelled.", "error")
-        return redirect(url_for("all_tickets"))
-
+    if ticket["cancelled"]:
+        flash("This ticket is already cancelled.", "error")
+        return redirect(url_for("ticket", ticket_id=ticket_id))
+    if ticket["used"]:
+        flash("Cannot cancel. Ticket was already used at the door.", "error")
+        return redirect(url_for("ticket", ticket_id=ticket_id))
+    reason = f"Cancelled by {g.user['username']} from ticket page"
+    now = lagos_timestamp()
     db = get_db()
-    query(
-        "UPDATE tickets SET cancelled = FALSE, cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, "
-        "refunded = FALSE, refund_amount = NULL, refunded_at = NULL, refunded_by = NULL WHERE id = %s",
-        (ticket_id,),
-    )
-    log_audit(ticket_id, "reactivated", g.user["id"], "")
+    query("UPDATE tickets SET cancelled = TRUE, cancelled_at = %s, cancelled_by = %s, cancel_reason = %s WHERE id = %s", (now, g.user["id"], reason, ticket_id))
+    log_audit(ticket_id, "cancelled", g.user["id"], reason)
     db.commit()
-    flash(f"Ticket {ticket['ticket_code']} was reactivated.", "success")
-    return redirect(url_for("all_tickets"))
-
+    flash(f"Ticket {ticket['ticket_code']} was cancelled.", "success")
+    return redirect(url_for("ticket", ticket_id=ticket_id))
 
 @app.route("/scan")
 @login_required()
 def scan():
     return render_template("scan.html", event_name=EVENT_NAME, user=g.user)
 
-
-# Generate QR images on demand. The QR payload itself is stored in PostgreSQL
-# (qr_data); no QR image files are written to static/qr or the server filesystem.
 @app.route("/qr/<path:ticket_code>.png")
 @login_required()
 def qr_image(ticket_code):
-    ticket = query(
-        "SELECT ticket_code, qr_data FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)",
-        (ticket_code,),
-    ).fetchone()
+    ticket = query("SELECT ticket_code, qr_data FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)).fetchone()
     if not ticket:
         return "Ticket not found", 404
-
     payload = ticket["qr_data"] or ticket["ticket_code"]
-    verify_url = f"{request.host_url}api/verify/{ticket['ticket_code']}"
-    # The QR carries the ticket code directly. The scanner can validate it through
-    # /check_ticket, while the verification URL remains useful for compatible readers.
     img = qrcode.make(payload)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return Response(
-        buf.getvalue(),
-        mimetype="image/png",
-        headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.png"'},
-    )
-
+    return Response(buf.getvalue(), mimetype="image/png", headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.png"'})
 
 @app.route("/ticket_issued/<int:ticket_id>")
 @login_required()
@@ -704,72 +493,11 @@ def ticket_issued(ticket_id):
     ticket = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s", (ticket_id,)).fetchone()
     if not ticket:
         return "Ticket not found", 404
-    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME,
-                           price=ticket["amount_paid"], qr_exists=True, user=g.user)
-
-
-# Staff-facing reprint: any logged-in seller/admin can pull the PDF for any
-# ticket by its internal id, from the ticket-issued page or All Tickets.
-@app.route("/ticket/<int:ticket_id>/pdf")
-@login_required()
-def ticket_pdf(ticket_id):
-    ticket = get_ticket_or_404(ticket_id)
-    buf = build_ticket_pdf(ticket)
-    return Response(
-        buf.getvalue(),
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.pdf"'},
-    )
-
-
-# Guest-facing, unauthenticated download used by the WhatsApp link. This is
-# safe without login because the ticket_code is itself a 12-character random
-# bearer token (same secret already printed on the QR/ticket) and only ever
-# unlocks that single ticket's own PDF — never a listing of other tickets.
-@app.route("/t/<path:ticket_code>/pdf")
-@limiter.limit("30 per minute")
-def public_ticket_pdf(ticket_code):
-    ticket = query(
-        "SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)
-    ).fetchone()
-    if not ticket:
-        abort(404)
-    buf = build_ticket_pdf(ticket)
-    return Response(
-        buf.getvalue(),
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.pdf"'},
-    )
-
-
-@app.route("/ticket/<int:ticket_id>/whatsapp")
-@login_required()
-def send_ticket_whatsapp(ticket_id):
-    ticket = get_ticket_or_404(ticket_id)
-    db = get_db()
-    query(
-        "UPDATE tickets SET send_count = send_count + 1, last_sent_at = %s WHERE id = %s",
-        (lagos_timestamp(), ticket_id),
-    )
-    log_audit(ticket_id, "whatsapp_sent", g.user["id"], f"To {ticket['whatsapp']}")
-    db.commit()
-
-    link = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
-    message = (
-        f"Hi {ticket['name']}, here is your {EVENT_NAME} ticket.\n"
-        f"Ticket code: {ticket['ticket_code']}\n"
-        f"Download your ticket & QR here: {link}\n"
-        f"See you there!"
-    )
-    dial = whatsapp_dial_number(ticket["whatsapp"])
-    wa_url = f"https://wa.me/{dial}?text={urllib.parse.quote(message)}"
-    return redirect(wa_url)
-
+    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, price=ticket["amount_paid"], qr_exists=True, user=g.user)
 
 def normalize_phone(raw):
     digits = re.sub(r"\D", "", raw or "")
     return digits[-10:] if len(digits) >= 10 else digits
-
 
 @app.route("/check_ticket", methods=["POST"])
 @login_required()
@@ -779,17 +507,11 @@ def check_ticket():
     lookup = raw
     if "http://" in lookup or "https://" in lookup:
         lookup = lookup.rstrip("/").rsplit("/", 1)[-1]
-
     ticket = None
-    # QR/public-code lookup first. The numeric DB primary key is intentionally not the public ticket ID.
     if lookup:
         ticket = query("SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (lookup,)).fetchone()
-
-    # Backwards-compatible manual lookup for an old numeric ID, without exposing it on new tickets.
     if not ticket and lookup.isdigit():
         ticket = query("SELECT * FROM tickets WHERE id = %s", (int(lookup),)).fetchone()
-
-    # Phone-number lookup remains available for gate staff.
     if not ticket:
         target = normalize_phone(raw)
         if len(target) >= 7:
@@ -798,41 +520,21 @@ def check_ticket():
             if len(matches) == 1:
                 ticket = matches[0]
             elif len(matches) > 1:
-                return {
-                    "status": "MULTIPLE",
-                    "msg": f"{len(matches)} tickets are registered to this number — pick the guest.",
-                    "matches": [{"id": t["id"], "ticket_code": t["ticket_code"], "name": t["name"], "used": bool(t["used"])} for t in matches],
-                }
-
+                return {"status": "MULTIPLE", "msg": f"{len(matches)} tickets are registered to this number — pick the guest.", "matches": [{"id": t["id"], "ticket_code": t["ticket_code"], "name": t["name"], "used": bool(t["used"])} for t in matches]}
     if not ticket:
         return {"status": "INVALID", "msg": f"No ticket found for \"{raw}\""}
-
     if ticket["cancelled"]:
         reason = f" ({ticket['cancel_reason']})" if ticket["cancel_reason"] else ""
-        return {
-            "status": "CANCELLED",
-            "msg": f"This ticket was cancelled{reason}. Entry denied.",
-            "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]
-        }
-
+        return {"status": "CANCELLED", "msg": f"This ticket was cancelled{reason}. Entry denied.", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
     if ticket["used"]:
-        return {
-            "status": "ALREADY USED",
-            "msg": f"Already scanned at {ticket['used_at']} (Lagos time)",
-            "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]
-        }
-
+        return {"status": "ALREADY USED", "msg": f"Already scanned at {ticket['used_at']} (Lagos time)", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
     used_time = lagos_timestamp()
     updated = query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s AND used = FALSE RETURNING id", (used_time, ticket["id"])).fetchone()
     if not updated:
         get_db().rollback()
         return {"status": "ALREADY USED", "msg": "This ticket has already been used."}
     get_db().commit()
-    return {
-        "status": "VALID", "msg": "Entry Approved", "name": ticket["name"],
-        "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]
-    }
-
+    return {"status": "VALID", "msg": "Entry Approved", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
 
 @app.route("/api/verify/<path:ticket_code>")
 @login_required()
@@ -853,20 +555,16 @@ def verify(ticket_code):
     db.commit()
     return {"status": "ok", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
 
-
 @app.route("/export")
 @login_required(role="admin")
 def export_csv():
     tickets = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC").fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Sold By", "Amount Paid", "Created At", "Used", "Used At",
-                 "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
+    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Sold By", "Amount Paid", "Created At", "Used", "Used At", "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
     for t in tickets:
-        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t["username"], t["amount_paid"], t["created_at"],
-                     t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
+        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t["username"], t["amount_paid"], t["created_at"], t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
     return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=owambe_tickets.csv"})
-
 
 if __name__ == "__main__":
     app.run(debug=True)
