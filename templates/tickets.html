@@ -1,15 +1,76 @@
 {% extends "base.html" %}
 {% block title %}All Tickets · {{ event_name }}{% endblock %}
 {% block content %}
-<div class="page-heading"><div><span class="eyebrow">TICKET CATALOGUE</span><h1>All tickets</h1><p>Search across every ticket, no matter who sold it.</p></div><a href="{{ url_for('home') }}" class="btn secondary">Home</a></div>
+<div class="page-heading">
+  <div>
+    <span class="eyebrow">TICKET CATALOGUE</span>
+    <h1>All tickets</h1>
+    <p>Search across every ticket, no matter who sold it.</p>
+  </div>
+  <a href="{{ url_for('home') }}" class="btn secondary">Home</a>
+</div>
+
 <form class="search-bar" method="get">
   <input type="text" name="q" value="{{ q }}" placeholder="Search name, WhatsApp, ticket code or ID">
   <button type="submit">Search</button>
 </form>
-<div class="toolbar result-toolbar"><span class="muted small">{{ tickets|length }} result{{ 's' if tickets|length != 1 else '' }}</span><div><a href="{{ url_for('scan') }}">Scanner</a>{% if user.role == 'admin' %} · <a href="{{ url_for('export_csv') }}">Export CSV</a>{% endif %}</div></div>
-<div class="table-wrap"><table><thead><tr><th>Ticket Code</th><th>Name</th><th>WhatsApp</th><th>Sold By</th><th>Sold</th><th>Status</th><th>QR</th></tr></thead><tbody>
-{% for t in tickets %}
-<tr><td data-label="Ticket Code"><strong>{{ t.ticket_code }}</strong></td><td data-label="Name">{{ t.name }}</td><td data-label="WhatsApp">{{ t.whatsapp }}</td><td data-label="Sold By">{{ t.username or 'Unknown / removed' }}</td><td data-label="Sold">{{ t.created_at }} WAT</td><td data-label="Status">{% if t.used %}<span class="badge used">Checked In</span>{% else %}<span class="badge valid">Not Yet</span>{% endif %}</td><td data-label="QR"><a href="{{ url_for('qr_image', ticket_code=t.ticket_code) }}" download="owambe_{{ t.ticket_code }}.png">Download</a></td></tr>
-{% else %}<tr><td colspan="7" class="empty-cell">No tickets match.</td></tr>{% endfor %}
-</tbody></table></div>
+
+<div class="toolbar result-toolbar">
+  <span class="muted small">{{ tickets|length }} result{{ 's' if tickets|length != 1 else '' }}</span>
+  <div><a href="{{ url_for('scan') }}">Scanner</a>{% if user.role == 'admin' %} · <a href="{{ url_for('export_csv') }}">Export CSV</a>{% endif %}</div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Ticket Code</th>
+        <th>Name</th>
+        <th>WhatsApp</th>
+        <th>Sold By</th>
+        <th>Sold</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in tickets %}
+      <tr>
+        <td data-label="Ticket Code"><strong>{{ t.ticket_code }}</strong></td>
+        <td data-label="Name">{{ t.name }}</td>
+        <td data-label="WhatsApp">{{ t.whatsapp }}</td>
+        <td data-label="Sold By">{{ t.username or 'Unknown / removed' }}</td>
+        <td data-label="Sold">{{ t.created_at }} WAT</td>
+        <td data-label="Status">
+          {% if t.cancelled %}
+            <span class="badge danger">Cancelled</span>
+          {% elif t.used %}
+            <span class="badge used">Checked In</span>
+          {% else %}
+            <span class="badge valid">Not Yet</span>
+          {% endif %}
+        </td>
+        <td data-label="Actions">
+          <div class="ticket-actions">
+            <a href="{{ url_for('ticket_pdf', ticket_id=t.id) }}" class="small-btn">Download PDF</a>
+            
+            <a href="{{ url_for('send_ticket_whatsapp', ticket_id=t.id) }}" class="small-btn">Send WA</a>
+
+            {% if not t.cancelled and not t.used %}
+            <form method="POST" action="{{ url_for('cancel_ticket', ticket_id=t.id) }}" style="display:inline" onsubmit="return confirm('Cancel this ticket?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="small-btn danger-button">Cancel</button>
+            </form>
+            {% endif %}
+
+            <a href="{{ url_for('ticket', ticket_id=t.id) }}" class="small-btn secondary">View</a>
+          </div>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty-cell">No tickets match.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}
