@@ -9,19 +9,20 @@
     <div><span>Ticket Code</span><strong>{{ ticket.ticket_code }}</strong></div>
     <div><span>Guest Name</span><strong>{{ ticket.name }}</strong></div>
     <div><span>WhatsApp</span><strong>{{ ticket.whatsapp }}</strong></div>
+    <div><span>Seat</span><strong>{{ ticket.seat or 'General' }}</strong></div>
     <div><span>Amount Paid</span><strong>₦{{ "{:,}".format(ticket.amount_paid) }}</strong></div>
     <div><span>Event</span><strong>{{ event_name }}</strong></div>
-    <div><span>Status</span><strong>{{ ticket.status or 'Valid' }}</strong></div>
+    <div><span>Status</span><strong>{% if ticket.cancelled %}Cancelled{% elif ticket.used %}Used{% else %}Valid{% endif %}</strong></div>
   </div>
 
   <div class="qr-box"><img src="{{ url_for('qr_image', ticket_code=ticket.ticket_code) }}" width="220" height="220" alt="Ticket QR code"></div>
   
   <a href="{{ url_for('qr_image', ticket_code=ticket.ticket_code) }}" download="owambe_{{ ticket.ticket_code }}.png" class="btn secondary">Download QR Code</a>
 
-  <!-- NEW BUTTONS -->
+  <!-- FIXED BUTTONS -->
   <div class="stack-actions" style="margin-top:12px">
-    <button class="btn" onclick="handleTicketAction('wa')">Send Ticket via WhatsApp</button>
-    <button class="btn secondary" onclick="handleTicketAction('download')">Download Ticket PDF</button>
+    <a href="{{ url_for('send_ticket_whatsapp', ticket_id=ticket.id) }}" target="_blank" class="btn">📲 Send Ticket via WhatsApp</a>
+    <a href="{{ url_for('ticket_pdf', ticket_id=ticket.id) }}" target="_blank" class="btn secondary">📄 Download Ticket PDF</a>
   </div>
 
   <p class="muted small center">Send this QR code to the guest. Any seller can find the ticket again from All Tickets.</p>
@@ -29,22 +30,16 @@
 </div></div>
 
 <script>
-// Build ticket object from template and call pdf_generator.js
+// We no longer need JS for WhatsApp/PDF because we use direct links now
+// But keep this if you use it elsewhere
 const currentTicket = {
-    ticket_id: "{{ ticket.ticket_code }}",
+    ticket_id: "{{ ticket.id }}", // FIX: use DB id not ticket_code
+    ticket_code: "{{ ticket.ticket_code }}",
     event_name: "{{ event_name }}",
     guest_name: "{{ ticket.name }}",
     phone: "{{ ticket.whatsapp }}",
     amount: "{{ "{:,}".format(ticket.amount_paid) }}",
-    status: "{{ ticket.status or 'Valid' }}"
+    status: "{{ 'Cancelled' if ticket.cancelled else 'Used' if ticket.used else 'Valid' }}"
 };
-
-function handleTicketAction(action) {
-    if(action === 'download') {
-        downloadTicket(currentTicket);
-    } else {
-        sendTicketViaWhatsApp(currentTicket);
-    }
-}
 </script>
 {% endblock %}
