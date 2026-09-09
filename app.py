@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session, g, flash, Response, abort
-import os, io, csv, secrets, string, re
+import os, io, csv, secrets, string, re, urllib.parse
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import qrcode
@@ -9,6 +9,10 @@ import psycopg2.extras
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.lib.units import mm
+from reportlab.lib.colors import HexColor
+from reportlab.lib.utils import ImageReader
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY")
@@ -128,12 +132,34 @@ def init_db():
             value TEXT NOT NULL
         )
     """)
+    query("""
+        CREATE TABLE IF NOT EXISTS ticket_audit (
+            id SERIAL PRIMARY KEY,
+            ticket_id INTEGER NOT NULL REFERENCES tickets (id),
+            action TEXT NOT NULL,
+            performed_by INTEGER REFERENCES users (id),
+            detail TEXT,
+            created_at TEXT
+        )
+    """)
 
     # Safe upgrades for installations created by earlier versions.
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
     query("CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ticket_code ON tickets(ticket_code)")
+    # Cancellation / refund workflow — every change here is also written to ticket_audit.
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled_at TEXT")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancelled_by INTEGER REFERENCES users(id)")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cancel_reason TEXT")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded BOOLEAN NOT NULL DEFAULT FALSE")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refund_amount INTEGER")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded_at TEXT")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded_by INTEGER REFERENCES users(id)")
+    # Resend tracking, so staff can see whether/when a ticket was last (re)sent.
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_sent_at TEXT")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS send_count INTEGER NOT NULL DEFAULT 0")
 
     # Any legacy ticket without a code gets a secure code before the code is used operationally.
     missing = query("SELECT id FROM tickets WHERE ticket_code IS NULL OR ticket_code = ''").fetchall()
@@ -170,6 +196,97 @@ def get_ticket_price():
         return int(row["value"]) if row else DEFAULT_TICKET_PRICE
     except (TypeError, ValueError):
         return DEFAULT_TICKET_PRICE
+
+
+def log_audit(ticket_id, action, performed_by, detail=""):
+    # Caller is responsible for committing, so this can share a transaction
+    # with whatever ticket UPDATE it is recording alongside.
+    query(
+        "INSERT INTO ticket_audit (ticket_id, action, performed_by, detail, created_at) VALUES (%s,%s,%s,%s,%s)",
+        (ticket_id, action, performed_by, detail, lagos_timestamp()),
+    )
+
+
+def get_ticket_or_404(ticket_id):
+    ticket = query(
+        "SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s",
+        (ticket_id,),
+    ).fetchone()
+    if not ticket:
+        abort(404)
+    return ticket
+
+
+def whatsapp_dial_number(raw):
+    # Best-effort conversion of a locally-entered Nigerian number into the
+    # international, no-plus format wa.me expects (e.g. 0801... -> 234801...).
+    digits = re.sub(r"\D", "", raw or "")
+    if digits.startswith("234"):
+        return digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "234" + digits[1:]
+    if len(digits) == 10:
+        return "234" + digits
+    return digits
+
+
+def build_ticket_pdf(ticket):
+    # A pocket-sized (105 x 170mm) printable/shareable ticket: event header,
+    # QR code, guest details, and a CANCELLED stamp when applicable.
+    width, height = 105 * mm, 170 * mm
+    buf = io.BytesIO()
+    c = pdfcanvas.Canvas(buf, pagesize=(width, height))
+
+    c.setFillColor(HexColor("#0b1f2b"))
+    c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    c.setFillColor(HexColor("#42d7e9"))
+    c.setFont("Helvetica-Bold", 15)
+    c.drawCentredString(width / 2, height - 16 * mm, EVENT_NAME)
+    c.setFillColor(HexColor("#f4fbfd"))
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(width / 2, height - 23 * mm, "Event Ticket")
+
+    qr_img = qrcode.make(ticket["qr_data"] or ticket["ticket_code"])
+    qr_buf = io.BytesIO()
+    qr_img.save(qr_buf, format="PNG")
+    qr_buf.seek(0)
+    qr_size = 55 * mm
+    c.setFillColor(HexColor("#ffffff"))
+    c.roundRect((width - qr_size) / 2 - 4 * mm, height - 90 * mm - 4 * mm, qr_size + 8 * mm, qr_size + 8 * mm, 4, fill=1, stroke=0)
+    c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, height - 90 * mm, width=qr_size, height=qr_size, mask="auto")
+
+    def field(y, label, value):
+        c.setFillColor(HexColor("#a8c1c8"))
+        c.setFont("Helvetica", 7.5)
+        c.drawString(10 * mm, y, label.upper())
+        c.setFillColor(HexColor("#f4fbfd"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(10 * mm, y - 5 * mm, str(value)[:40])
+
+    y = height - 102 * mm
+    field(y, "Ticket Code", ticket["ticket_code"]); y -= 13 * mm
+    field(y, "Guest Name", ticket["name"]); y -= 13 * mm
+    field(y, "WhatsApp", ticket["whatsapp"]); y -= 13 * mm
+    field(y, "Amount Paid", f"NGN {ticket['amount_paid']:,}")
+
+    if ticket.get("cancelled"):
+        c.saveState()
+        c.setFillColor(HexColor("#ed5b63"))
+        c.setFont("Helvetica-Bold", 26)
+        c.translate(width / 2, 34 * mm)
+        c.rotate(22)
+        c.drawCentredString(0, 0, "CANCELLED")
+        c.restoreState()
+
+    c.setFillColor(HexColor("#a8c1c8"))
+    c.setFont("Helvetica", 6.5)
+    c.drawCentredString(width / 2, 8 * mm, "Present this ticket (screen or print) with a valid QR at entry.")
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
 
 
 with app.app_context():
@@ -368,7 +485,7 @@ def report():
     sales = query("""
         SELECT u.id, u.username, u.role, u.active,
                COUNT(t.id) AS tickets_sold,
-               COALESCE(SUM(t.amount_paid),0) AS total_cash,
+               COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash,
                COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used
         FROM users u
         LEFT JOIN tickets t ON u.id = t.sold_by
@@ -379,7 +496,7 @@ def report():
     overall = query("""
         SELECT COUNT(*) AS sold,
                COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid),0) AS cash
+               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
         FROM tickets
     """).fetchone()
     return render_template("report.html", sales=sales, users=users, overall=overall,
@@ -394,13 +511,13 @@ def home():
     overall = query("""
         SELECT COUNT(*) AS sold,
                COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid),0) AS cash
+               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
         FROM tickets
     """).fetchone()
     mine = query("""
         SELECT COUNT(*) AS sold,
                COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid),0) AS cash
+               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
         FROM tickets WHERE sold_by = %s
     """, (user["id"],)).fetchone()
     return render_template("home.html", overall=overall, mine=mine, event_name=EVENT_NAME, user=user,
@@ -430,13 +547,13 @@ def sell():
     overall = query("""
         SELECT COUNT(*) AS sold,
                COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid),0) AS cash
+               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
         FROM tickets
     """).fetchone()
     mine = query("""
         SELECT COUNT(*) AS sold,
                COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used,
-               COALESCE(SUM(amount_paid),0) AS cash
+               COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash
         FROM tickets WHERE sold_by = %s
     """, (user["id"],)).fetchone()
     # Deliberately only the two most recent tickets for the quick view.
@@ -466,6 +583,86 @@ def all_tickets():
     like = f"%{q}%"
     tickets = query(sql, (like, like, like, like)).fetchall()
     return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user)
+
+
+# ------------------ CANCEL / REFUND WORKFLOW ------------------
+# Admin-only: cancelling or refunding reverses money already collected and
+# blocks a ticket at the door, so it is kept out of ordinary seller reach and
+# every step is written to ticket_audit for the record.
+@app.route("/admin/tickets/<int:ticket_id>/cancel", methods=["GET", "POST"])
+@login_required(role="admin")
+def cancel_ticket(ticket_id):
+    ticket = get_ticket_or_404(ticket_id)
+
+    if request.method == "POST":
+        if ticket["cancelled"]:
+            flash("This ticket is already cancelled.", "error")
+            return redirect(url_for("all_tickets"))
+
+        reason = request.form.get("reason", "").strip()
+        if not reason:
+            flash("A cancellation reason is required for the record.", "error")
+            return redirect(url_for("cancel_ticket", ticket_id=ticket_id))
+
+        refund = request.form.get("refund") == "on"
+        refund_amount = None
+        if refund:
+            raw_amount = request.form.get("refund_amount", "").replace(",", "").strip()
+            try:
+                refund_amount = int(raw_amount) if raw_amount else ticket["amount_paid"]
+                if refund_amount < 0 or refund_amount > ticket["amount_paid"]:
+                    raise ValueError
+            except ValueError:
+                flash("Enter a valid refund amount (up to the amount paid).", "error")
+                return redirect(url_for("cancel_ticket", ticket_id=ticket_id))
+
+        now = lagos_timestamp()
+        db = get_db()
+        query(
+            "UPDATE tickets SET cancelled = TRUE, cancelled_at = %s, cancelled_by = %s, cancel_reason = %s WHERE id = %s",
+            (now, g.user["id"], reason, ticket_id),
+        )
+        log_audit(ticket_id, "cancelled", g.user["id"], reason)
+        if refund:
+            query(
+                "UPDATE tickets SET refunded = TRUE, refund_amount = %s, refunded_at = %s, refunded_by = %s WHERE id = %s",
+                (refund_amount, now, g.user["id"], ticket_id),
+            )
+            log_audit(ticket_id, "refunded", g.user["id"], f"NGN {refund_amount:,}")
+        db.commit()
+
+        msg = f"Ticket {ticket['ticket_code']} was cancelled."
+        if refund:
+            msg = f"Ticket {ticket['ticket_code']} was cancelled and NGN {refund_amount:,} marked refunded."
+        flash(msg, "success")
+        return redirect(url_for("all_tickets"))
+
+    audit = query(
+        "SELECT a.*, u.username FROM ticket_audit a LEFT JOIN users u ON a.performed_by = u.id "
+        "WHERE a.ticket_id = %s ORDER BY a.id DESC",
+        (ticket_id,),
+    ).fetchall()
+    return render_template("cancel_ticket.html", ticket=ticket, audit=audit, event_name=EVENT_NAME, user=g.user)
+
+
+@app.route("/admin/tickets/<int:ticket_id>/reactivate", methods=["POST"])
+@login_required(role="admin")
+def reactivate_ticket(ticket_id):
+    ticket = get_ticket_or_404(ticket_id)
+    if not ticket["cancelled"]:
+        flash("This ticket isn't cancelled.", "error")
+        return redirect(url_for("all_tickets"))
+
+    db = get_db()
+    query(
+        "UPDATE tickets SET cancelled = FALSE, cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, "
+        "refunded = FALSE, refund_amount = NULL, refunded_at = NULL, refunded_by = NULL WHERE id = %s",
+        (ticket_id,),
+    )
+    log_audit(ticket_id, "reactivated", g.user["id"], "")
+    db.commit()
+    flash(f"Ticket {ticket['ticket_code']} was reactivated.", "success")
+    return redirect(url_for("all_tickets"))
 
 
 @app.route("/scan")
@@ -511,6 +708,64 @@ def ticket_issued(ticket_id):
                            price=ticket["amount_paid"], qr_exists=True, user=g.user)
 
 
+# Staff-facing reprint: any logged-in seller/admin can pull the PDF for any
+# ticket by its internal id, from the ticket-issued page or All Tickets.
+@app.route("/ticket/<int:ticket_id>/pdf")
+@login_required()
+def ticket_pdf(ticket_id):
+    ticket = get_ticket_or_404(ticket_id)
+    buf = build_ticket_pdf(ticket)
+    return Response(
+        buf.getvalue(),
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.pdf"'},
+    )
+
+
+# Guest-facing, unauthenticated download used by the WhatsApp link. This is
+# safe without login because the ticket_code is itself a 12-character random
+# bearer token (same secret already printed on the QR/ticket) and only ever
+# unlocks that single ticket's own PDF — never a listing of other tickets.
+@app.route("/t/<path:ticket_code>/pdf")
+@limiter.limit("30 per minute")
+def public_ticket_pdf(ticket_code):
+    ticket = query(
+        "SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)
+    ).fetchone()
+    if not ticket:
+        abort(404)
+    buf = build_ticket_pdf(ticket)
+    return Response(
+        buf.getvalue(),
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="owambe_{ticket["ticket_code"]}.pdf"'},
+    )
+
+
+@app.route("/ticket/<int:ticket_id>/whatsapp")
+@login_required()
+def send_ticket_whatsapp(ticket_id):
+    ticket = get_ticket_or_404(ticket_id)
+    db = get_db()
+    query(
+        "UPDATE tickets SET send_count = send_count + 1, last_sent_at = %s WHERE id = %s",
+        (lagos_timestamp(), ticket_id),
+    )
+    log_audit(ticket_id, "whatsapp_sent", g.user["id"], f"To {ticket['whatsapp']}")
+    db.commit()
+
+    link = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
+    message = (
+        f"Hi {ticket['name']}, here is your {EVENT_NAME} ticket.\n"
+        f"Ticket code: {ticket['ticket_code']}\n"
+        f"Download your ticket & QR here: {link}\n"
+        f"See you there!"
+    )
+    dial = whatsapp_dial_number(ticket["whatsapp"])
+    wa_url = f"https://wa.me/{dial}?text={urllib.parse.quote(message)}"
+    return redirect(wa_url)
+
+
 def normalize_phone(raw):
     digits = re.sub(r"\D", "", raw or "")
     return digits[-10:] if len(digits) >= 10 else digits
@@ -552,6 +807,14 @@ def check_ticket():
     if not ticket:
         return {"status": "INVALID", "msg": f"No ticket found for \"{raw}\""}
 
+    if ticket["cancelled"]:
+        reason = f" ({ticket['cancel_reason']})" if ticket["cancel_reason"] else ""
+        return {
+            "status": "CANCELLED",
+            "msg": f"This ticket was cancelled{reason}. Entry denied.",
+            "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]
+        }
+
     if ticket["used"]:
         return {
             "status": "ALREADY USED",
@@ -578,6 +841,8 @@ def verify(ticket_code):
     ticket = query("SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)).fetchone()
     if not ticket:
         return {"status": "invalid"}
+    if ticket["cancelled"]:
+        return {"status": "cancelled", "name": ticket["name"]}
     if ticket["used"]:
         return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
     used_time = lagos_timestamp()
@@ -595,9 +860,11 @@ def export_csv():
     tickets = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC").fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Sold By", "Amount Paid", "Created At", "Used", "Used At"])
+    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Sold By", "Amount Paid", "Created At", "Used", "Used At",
+                 "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
     for t in tickets:
-        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t["username"], t["amount_paid"], t["created_at"], t["used"], t["used_at"]])
+        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t["username"], t["amount_paid"], t["created_at"],
+                     t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
     return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=owambe_tickets.csv"})
 
 
