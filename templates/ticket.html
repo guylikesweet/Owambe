@@ -100,6 +100,8 @@
     .stack-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
     .stack-actions .btn { width: 100%; }
     .stack-actions form { margin: 0; }
+    .table-note { font-size: 11px; color: #a8c1c8; text-align: center; margin-top: -6px; margin-bottom: 14px; }
+    .table-note a { color: #42d7e9; }
 </style>
 
 <div class="owambe-ticket">
@@ -117,6 +119,10 @@
     <!-- EVENT -->
     <div class="event-title">{{ event_name }}</div>
 
+    {% if ticket.table_id %}
+    <div class="table-note">Part of a {{ ticket.category }} · Table ID {{ ticket.table_id }} — <a href="{{ url_for('all_tickets', q=ticket.table_id) }}">view other guests on this table</a></div>
+    {% endif %}
+
     <!-- QR -->
     <div class="qr-wrap">
         <img src="data:image/png;base64,{{ qr_base64 }}" alt="QR Code">
@@ -130,7 +136,10 @@
         
         <hr class="divider">
         
+        <div class="owambe-field"><span class="k">Category</span><div class="v">{{ ticket.category or 'Regular' }}</div></div>
+        {% if ticket.table_id %}
         <div class="owambe-field"><span class="k">Seat</span><div class="v">{{ ticket.seat }}</div></div>
+        {% endif %}
         <div class="owambe-field"><span class="k">Amount Paid</span><div class="v">₦{{ "{:,}".format(ticket.amount_paid) }}</div></div>
     </div>
 
@@ -173,6 +182,8 @@ const currentTicket = {
     phone: "{{ ticket.whatsapp if ticket else '' }}",
     amount_paid: "{{ ticket.amount_paid if ticket else '0' }}",
     seat: "{{ ticket.seat if ticket else 'General' }}",
+    category: "{{ ticket.category if ticket else 'Regular' }}",
+    table_id: "{{ ticket.table_id if ticket and ticket.table_id else '' }}",
     status: "{{ 'cancelled' if ticket and ticket.cancelled else 'used' if ticket and ticket.used else 'valid' }}",
     created_at: "{{ ticket.created_at if ticket else '' }}",
     cancelled: {{ 'true' if ticket and ticket.cancelled else 'false' }}
