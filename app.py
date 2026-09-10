@@ -588,9 +588,9 @@ def sell():
 @login_required()
 def all_tickets():
     q = request.args.get("q", "").strip()
-    sql = """SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.name ILIKE %s OR t.whatsapp ILIKE %s OR COALESCE(t.ticket_code,'') ILIKE %s OR t.id::text ILIKE %s ORDER BY t.id DESC"""
+    sql = """SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.name ILIKE %s OR t.whatsapp ILIKE %s OR COALESCE(t.ticket_code,'') ILIKE %s OR t.id::text ILIKE %s OR COALESCE(t.table_id,'') ILIKE %s ORDER BY t.id DESC"""
     like = f"%{q}%"
-    tickets = query(sql, (like, like, like, like)).fetchall()
+    tickets = query(sql, (like, like, like, like, like)).fetchall()
     return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user)
 
 @app.route("/ticket/<int:ticket_id>/pdf")
