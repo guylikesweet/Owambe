@@ -154,7 +154,10 @@ def init_db():
         print("Default admin created: admin / admin123")
 
 def get_ticket_prices():
-    rows = query("SELECT key, value FROM app_settings WHERE key LIKE 'price_%'").fetchall()
+    # FIX: the '%' in 'price_%' was being swallowed by psycopg2's %s-placeholder
+    # parser because it was hardcoded into the SQL string with no matching param.
+    # Passing the pattern as a bound parameter avoids that entirely.
+    rows = query("SELECT key, value FROM app_settings WHERE key LIKE %s", ("price_%",)).fetchall()
     existing = {r["key"]: r["value"] for r in rows}
     prices = {}
     for label, slug in CATEGORY_SLUGS.items():
