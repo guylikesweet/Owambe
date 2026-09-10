@@ -126,15 +126,30 @@ handleButton.addEventListener('click', async () => {
 
 input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkTicket(input.value); } });
 
-function onScanSuccess(decodedText) {
-  if (!canScan) return;
-  html5QrCode.stop();
-  checkTicket(decodedText);
+// FIX 1: Extract ticket code from URL if QR contains full link
+function extractTicketCode(decodedText) {
+    let valueToCheck = decodedText.trim();
+    try {
+        const url = new URL(decodedText);
+        const parts = url.pathname.split('/').filter(Boolean); // ["t", "OW-XXXX", "pdf"]
+        if(parts[0] === 't' && parts[1]){
+            valueToCheck = parts[1]; // This gives us "OW-XXXX"
+        }
+    } catch (e) {
+        // Not a URL, use raw text
+    }
+    return valueToCheck;
 }
 
-// NEW: Pick the 1x normal camera, not 0.5x wide
+function onScanSuccess(decodedText) { 
+  if (!canScan) return; 
+  html5QrCode.stop(); // STOP CAMERA IMMEDIATELY
+  const code = extractTicketCode(decodedText);
+  checkTicket(code); 
+}
+
+// FIX 2: Pick the 1x normal camera, not 0.5x wide
 async function pickBestBackCamera(cameras) {
-    // Prefer cameras that are NOT ultrawide. Usually label contains "0.5" or "ultra"
     let backCameras = cameras.filter(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('rear') || c.label.toLowerCase().includes('environment'));
     if(backCameras.length === 0) backCameras = cameras;
 
@@ -142,7 +157,7 @@ async function pickBestBackCamera(cameras) {
     backCameras.sort((a,b) => {
         const aWide = a.label.includes('0.5') || a.label.toLowerCase().includes('ultra');
         const bWide = b.label.includes('0.5') || b.label.toLowerCase().includes('ultra');
-        return aWide - bWide; // false comes before true
+        return aWide - bWide;
     });
     return backCameras[0]?.id || cameras[0]?.id;
 }
@@ -150,19 +165,13 @@ async function pickBestBackCamera(cameras) {
 async function startScanner(cameraId) {
     const config = {
         fps: 10,
-        qrbox: { width: 250, height: 250 },
-        // THIS FORCES 1X ZOOM ON ANDROID
-        experimentalFeatures: {
-            useBarCodeDetectorIfSupported: true
-        }
+        qrbox: { width: 250, height: 250 }
     };
 
     await html5QrCode.start(
         { deviceId: { exact: cameraId } },
         config,
-        onScanSuccess,
-        // Try to force 1x zoom after start
-        (errorMessage) => {}
+        onScanSuccess
     ).then(async () => {
         const track = html5QrCode.getRunningTrack();
         if(track && track.getCapabilities){
@@ -187,15 +196,12 @@ switchBtn.addEventListener('click', async () => {
 document.addEventListener('DOMContentLoaded', async () => {
   html5QrCode = new Html5Qrcode("reader");
 
-  // 1. Get all cameras first
   cameras = await Html5Qrcode.getCameras();
   if (cameras && cameras.length) {
     switchBtn.hidden = cameras.length < 2;
-    // 2. Pick the best back camera = normal 1x
     currentCameraId = await pickBestBackCamera(cameras);
     await startScanner(currentCameraId);
   } else {
-    // Fallback
     await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess);
   }
 });
