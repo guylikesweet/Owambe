@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Scanner · {{ event_name }}{% endblock %}
 {% block content %}
-<div class="page-heading"><div><span class="eyebrow">DOOR CHECK-IN</span><h1>Scan ticket</h1><p>Point the camera at a QR code, or type a ticket code / WhatsApp number.</p></div><a href="{{ url_for('home') }}" class="btn secondary">Home</a></div>
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">DOOR CHECK-IN</span>
+        <h1>Scan ticket</h1>
+        <p>Point the camera at a QR code, or type a ticket code / WhatsApp number.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <button id="switch-cam-btn" class="btn secondary" type="button" hidden>Switch Camera</button>
+        <a href="{{ url_for('home') }}" class="btn secondary">Home</a>
+    </div>
+</div>
 <div class="card scanner-card">
   <div id="reader"></div>
   <form id="scan-form" autocomplete="off" onsubmit="return false;"><input type="text" id="scanner-input" placeholder="Ticket code or WhatsApp number"></form>
@@ -27,9 +37,12 @@ const titleBox = document.getElementById('scan-status-title');
 const messageBox = document.getElementById('scan-status-message');
 const guestBox = document.getElementById('scan-guest');
 const handleButton = document.getElementById('scan-handle');
+const switchBtn = document.getElementById('switch-cam-btn');
 let canScan = true;
 let activeResult = null;
-let html5QrCode = null; // CHANGED: use Html5Qrcode instead of Scanner
+let html5QrCode = null;
+let cameras = [];
+let currentCameraId = null;
 
 function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str || ''; return div.innerHTML; }
 
@@ -55,15 +68,15 @@ function showResult(data) {
   activeResult = data;
   const isValid = data.status === 'VALID';
   const isMultiple = data.status === 'MULTIPLE';
-  iconBox.textContent = isValid ? '✓' : (isMultiple ? '!' : '×');
+  iconBox.textContent = isValid? '✓' : (isMultiple? '!' : '×');
   titleBox.textContent = data.status;
-  titleBox.className = 'status-title ' + (isValid ? 'valid' : 'invalid');
+  titleBox.className = 'status-title ' + (isValid? 'valid' : 'invalid');
   messageBox.textContent = data.msg || '';
 
   if (isMultiple && Array.isArray(data.matches)) {
     guestBox.innerHTML = data.matches.map(m => `
       <button type="button" class="btn secondary match-pick" data-code="${escapeHtml(m.ticket_code)}" style="margin-top:0;">
-        ${escapeHtml(m.name)}${m.used ? ' — already checked in' : ''}
+        ${escapeHtml(m.name)}${m.used? ' — already checked in' : ''}
       </button>
     `).join('');
     guestBox.style.gridTemplateColumns = '1fr';
@@ -72,20 +85,20 @@ function showResult(data) {
     });
   } else {
     guestBox.style.gridTemplateColumns = '';
-    guestBox.innerHTML = data.name ? `<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div><div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div><div><span>Ticket</span><strong>${escapeHtml(data.ticket_code || '')}</strong></div>` : '';
+    guestBox.innerHTML = data.name? `<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div><div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div><div><span>Ticket</span><strong>${escapeHtml(data.ticket_code || '')}</strong></div>` : '';
   }
 
-  handleButton.textContent = isValid ? 'OKAY' : (isMultiple ? 'CANCEL' : 'HANDLED IT');
-  handleButton.className = 'btn ' + (isValid ? '' : 'danger-button');
+  handleButton.textContent = isValid? 'OKAY' : (isMultiple? 'CANCEL' : 'HANDLED IT');
+  handleButton.className = 'btn ' + (isValid? '' : 'danger-button');
   if (isValid) playTone('valid'); else if (!isMultiple) playTone('invalid');
   overlay.hidden = false;
   document.body.classList.add('modal-open');
-  if (!isMultiple) canScan = false; // Stop scanning
+  if (!isMultiple) canScan = false;
 }
 
 async function checkTicket(value) {
-  if (!value || !canScan) return;
-  canScan = false; // Lock immediately
+  if (!value ||!canScan) return;
+  canScan = false;
   value = value.trim();
   const formData = new FormData(); formData.append('data', value); formData.append('csrf_token', '{{ csrf_token() }}');
   try {
@@ -104,26 +117,91 @@ handleButton.addEventListener('click', async () => {
   activeResult = null;
   input.value = '';
   input.focus();
-  
-  // RESTART SCANNER
+
   canScan = true;
-  if(html5QrCode){
-    await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess);
+  if(html5QrCode && currentCameraId){
+    await startScanner(currentCameraId);
   }
 });
 
 input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkTicket(input.value); } });
 
-function onScanSuccess(decodedText) { 
-  if (!canScan) return; 
-  html5QrCode.stop(); // STOP CAMERA IMMEDIATELY
-  checkTicket(decodedText); 
+function onScanSuccess(decodedText) {
+  if (!canScan) return;
+  html5QrCode.stop();
+  checkTicket(decodedText);
 }
+
+// NEW: Pick the 1x normal camera, not 0.5x wide
+async function pickBestBackCamera(cameras) {
+    // Prefer cameras that are NOT ultrawide. Usually label contains "0.5" or "ultra"
+    let backCameras = cameras.filter(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('rear') || c.label.toLowerCase().includes('environment'));
+    if(backCameras.length === 0) backCameras = cameras;
+
+    // Sort: put 1x/main first, 0.5x/ultrawide last
+    backCameras.sort((a,b) => {
+        const aWide = a.label.includes('0.5') || a.label.toLowerCase().includes('ultra');
+        const bWide = b.label.includes('0.5') || b.label.toLowerCase().includes('ultra');
+        return aWide - bWide; // false comes before true
+    });
+    return backCameras[0]?.id || cameras[0]?.id;
+}
+
+async function startScanner(cameraId) {
+    const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        // THIS FORCES 1X ZOOM ON ANDROID
+        experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true
+        }
+    };
+
+    await html5QrCode.start(
+        { deviceId: { exact: cameraId } },
+        config,
+        onScanSuccess,
+        // Try to force 1x zoom after start
+        (errorMessage) => {}
+    ).then(async () => {
+        const track = html5QrCode.getRunningTrack();
+        if(track && track.getCapabilities){
+            const caps = track.getCapabilities();
+            if(caps.zoom){
+                await track.applyConstraints({ advanced: [{ zoom: 1 }] }).catch(()=>{});
+            }
+        }
+    });
+}
+
+switchBtn.addEventListener('click', async () => {
+    if(cameras.length < 2) return;
+    const currentIndex = cameras.findIndex(c => c.id === currentCameraId);
+    const nextIndex = (currentIndex + 1) % cameras.length;
+    currentCameraId = cameras[nextIndex].id;
+    await html5QrCode.stop();
+    await startScanner(currentCameraId);
+});
 
 // INIT SCANNER
 document.addEventListener('DOMContentLoaded', async () => {
   html5QrCode = new Html5Qrcode("reader");
-  await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess);
+
+  // 1. Get all cameras first
+  cameras = await Html5Qrcode.getCameras();
+  if (cameras && cameras.length) {
+    switchBtn.hidden = cameras.length < 2;
+    // 2. Pick the best back camera = normal 1x
+    currentCameraId = await pickBestBackCamera(cameras);
+    await startScanner(currentCameraId);
+  } else {
+    // Fallback
+    await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess);
+  }
 });
+
+window.addEventListener('beforeunload', () => {
+    if(html5QrCode) html5QrCode.stop().catch(()=>{});
+})
 </script>
 {% endblock %}
