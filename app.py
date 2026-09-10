@@ -191,7 +191,7 @@ def build_ticket_pdf(ticket):
     words = EVENT_NAME.split()
     line = ""
     for word in words:
-        if len(line + " + word) < 40:
+        if len(line + " " + word) < 40:
             line += " " + word if line else word
         else:
             lines.append(line)
