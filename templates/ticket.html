@@ -7,46 +7,53 @@
     .owambe-ticket {
         max-width: 420px;
         margin: 0 auto;
-        background: rgba(26, 47, 58, 0.88);
+        background: rgba(11, 31, 43, 0.90);
         border: 2px solid #D4AF37;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
         text-align: center;
-        backdrop-filter: blur(4px);
+        backdrop-filter: blur(6px);
         position: relative;
         overflow: hidden;
     }
-    .owambe-ticket::before { /* flier background */
+    .owambe-ticket::before {
         content: '';
         position: absolute;
         top: 0; left: 0; right: 0; bottom: 0;
-        background: url("{{ url_for('static', filename='img/owambe-flier.jpg') }}") center/cover no-repeat;
-        opacity: 0.18;
+        background: url("{{ url_for('static', filename='img/owambe-flyer.jpg') }}") center/cover no-repeat;
+        opacity: 0.15;
         z-index: -1;
     }
     .owambe-logo {
-        width: 160px;
-        margin: 0 auto 8px;
+        width: 140px;
+        margin: 0 auto 10px;
     }
     .event-title {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 700;
         color: #fff;
         line-height: 1.3;
+        margin-bottom: 14px;
     }
     .qr-wrap {
         background: white;
         padding: 12px;
         border-radius: 12px;
-        margin: 18px auto;
+        margin: 0 auto 16px;
         display: inline-block;
+        border: 3px solid #D4AF37;
     }
     .qr-wrap img { width: 200px; height: 200px; display: block; }
-    .owambe-field {
+    
+    .details-box {
         text-align: left;
-        margin: 14px 0;
-        padding-bottom: 8px;
-        border-bottom: 1px dashed rgba(212, 175, 55, 0.3);
+        margin: 0 0 16px 0;
+        padding: 14px;
+        background: rgba(0,0,0,0.25);
+        border-radius: 10px;
+    }
+    .owambe-field {
+        margin: 10px 0;
     }
     .owambe-field .k {
         font-size: 10px;
@@ -54,40 +61,52 @@
         text-transform: uppercase;
         display: block;
         margin-bottom: 2px;
+        letter-spacing: 0.5px;
     }
     .owambe-field .v {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 700;
         color: white;
+    }
+    .divider {
+        border: none;
+        border-top: 1px dashed rgba(212, 175, 55, 0.4);
+        margin: 10px 0;
     }
     .admit-line {
         color: #D4AF37;
         font-weight: 700;
         font-size: 11px;
-        margin: 16px 0;
+        margin: 12px 0;
         letter-spacing: 0.5px;
+        text-align: center;
     }
     .ticket-footer {
         font-size: 10px;
         color: #a8c1c8;
         margin-top: 10px;
+        text-align: center;
     }
     .status-banner {
         padding: 8px;
         border-radius: 8px;
         font-weight: 700;
-        margin-bottom: 16px;
+        margin-bottom: 14px;
+        font-size: 13px;
     }
     .status-banner.valid { background: rgba(66, 215, 233, 0.15); color: #42d7e9; }
     .status-banner.cancelled { background: rgba(237, 91, 99, 0.15); color: #ed5b63; }
     .status-banner.used { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+    .stack-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+    .stack-actions .btn { width: 100%; }
+    .stack-actions form { margin: 0; }
 </style>
 
 <div class="owambe-ticket">
   {% if ticket %}
     <!-- STATUS -->
-    <div class="status-banner {{ 'cancelled' if ticket.status == 'cancelled' else 'used' if ticket.used else 'valid' }}">
-      {% if ticket.status == 'cancelled' %} TICKET CANCELLED 
+    <div class="status-banner {{ 'cancelled' if ticket.cancelled else 'used' if ticket.used else 'valid' }}">
+      {% if ticket.cancelled %} TICKET CANCELLED 
       {% elif ticket.used %} ALREADY CHECKED IN 
       {% else %} TICKET VALID {% endif %}
     </div>
@@ -104,23 +123,30 @@
     </div>
 
     <!-- DETAILS -->
-    <div class="owambe-field"><span class="k">Ticket Code</span><div class="v">{{ ticket.id }}</div></div>
-    <div class="owambe-field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
-    <div class="owambe-field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
-    <div class="owambe-field"><span class="k">Amount Paid</span><div class="v">₦{{ "{:,}".format(ticket.amount_paid) }}</div></div>
+    <div class="details-box">
+        <div class="owambe-field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
+        <div class="owambe-field"><span class="k">Ticket Code</span><div class="v">{{ ticket.ticket_code }}</div></div>
+        <div class="owambe-field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
+        
+        <hr class="divider">
+        
+        <div class="owambe-field"><span class="k">Seat</span><div class="v">{{ ticket.seat }}</div></div>
+        <div class="owambe-field"><span class="k">Amount Paid</span><div class="v">₦{{ "{:,}".format(ticket.amount_paid) }}</div></div>
+    </div>
 
     <div class="admit-line">ADMIT ONE • PRESENT QR AT GATE</div>
     
     <div class="ticket-footer">
-      Issued: {{ ticket.created_at }} | Status: {{ ticket.status }}
+      Issued: {{ ticket.created_at }} | Seller: {{ ticket.username }}
     </div>
 
     <!-- ACTIONS -->
-    <div class="stack-actions" style="margin-top:20px">
-      {% if ticket.status != 'cancelled' %}
+    <div class="stack-actions">
+      {% if not ticket.cancelled %}
       <button class="btn" onclick="handleTicketAction('wa')">Send Ticket via WhatsApp</button>
       <button class="btn secondary" onclick="handleTicketAction('download')">Download Ticket PDF</button>
       <form method="POST" action="{{ url_for('cancel_ticket', ticket_id=ticket.id) }}" onsubmit="return confirm('Cancel this ticket and mark for refund?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn danger-button">Cancel Ticket & Refund</button>
       </form>
       {% else %}
@@ -136,19 +162,20 @@
   {% endif %}
 </div>
 
+<script src="{{ url_for('static', filename='js/pdf_generator.js') }}"></script>
 <script>
-// Build ticket object from template - updated to match new pdf_generator.js
+// Build ticket object from template - matches pdf_generator.js
 const currentTicket = {
     ticket_id: "{{ ticket.id if ticket else ticket_id }}",
-    ticket_code: "{{ ticket.id if ticket else ticket_id }}",
+    ticket_code: "{{ ticket.ticket_code if ticket else ticket_id }}",
     event_name: "{{ event_name }}",
     guest_name: "{{ ticket.name if ticket else '' }}",
     phone: "{{ ticket.whatsapp if ticket else '' }}",
     amount_paid: "{{ ticket.amount_paid if ticket else '0' }}",
-    seat: "General",
-    status: "{{ ticket.status if ticket else 'invalid' }}",
+    seat: "{{ ticket.seat if ticket else 'General' }}",
+    status: "{{ 'cancelled' if ticket and ticket.cancelled else 'used' if ticket and ticket.used else 'valid' }}",
     created_at: "{{ ticket.created_at if ticket else '' }}",
-    cancelled: {{ 'true' if ticket and ticket.status == 'cancelled' else 'false' }}
+    cancelled: {{ 'true' if ticket and ticket.cancelled else 'false' }}
 };
 
 function handleTicketAction(action) {
