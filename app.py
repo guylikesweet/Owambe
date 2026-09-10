@@ -228,8 +228,10 @@ def build_ticket_pdf(ticket):
     y = field(y, "SEAT", ticket.get("seat", "General"))
     y = field(y, "AMOUNT PAID", f"NGN {ticket['amount_paid']:,}")
 
-    # 7. FOOTER - MOVED DOWN 6MM
-    footer_divider_y = card_y + 37 * mm # was 31 * mm
+    # 7. FOOTER - positioned just below the details box
+    # Keep the dashed line below the full details area, then keep
+    # all footer elements below that line at the same relative spacing.
+    footer_divider_y = details_top - details_height - 4 * mm
 
     c.setStrokeColor(HexColor("#D4AF37"))
     c.setLineWidth(1)
