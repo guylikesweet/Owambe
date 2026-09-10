@@ -19,7 +19,7 @@ async function generateTicketPDF(ticket) {
     let bgImg = null;
     let logoImg = null;
     try {
-        bgImg = await toBase64('/static/img/owambe-flier.jpg');
+        bgImg = await toBase64('/static/img/owambe-flyer.jpg');
         logoImg = await toBase64('/static/img/owambe-logo.png');
     } catch(e) {
         console.log("Images not found, using fallback")
@@ -85,11 +85,16 @@ async function generateTicketPDF(ticket) {
     doc.setFontSize(7.5);
     doc.setTextColor(66, 215, 233); // cyan labels
     let y = cardY + 68;
-    
+
+    const category = ticket.category || "Regular";
+    const ticketTypeDisplay = ticket.table_id
+        ? `${category} \u2022 ${ticket.seat || ''}`
+        : category;
+
     const fields = [
         ["GUEST NAME", ticket.guest_name],
         ["TICKET CODE", ticket.ticket_code],
-        ["SEAT", ticket.seat || "General"],
+        ["TICKET TYPE", ticketTypeDisplay],
         ["AMOUNT", `NGN ${Number(ticket.amount_paid || 3500).toLocaleString()}`]
     ];
     
