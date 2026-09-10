@@ -153,7 +153,7 @@ def build_ticket_pdf(ticket):
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
 
-    # 1. FULL FLIER BACKGROUND - using flyer spelling
+    # 1. FULL FLIER BACKGROUND
     try:
         bg_path = "static/img/owambe-flyer.jpg"
         bg_img = ImageReader(bg_path)
@@ -191,7 +191,7 @@ def build_ticket_pdf(ticket):
     words = EVENT_NAME.split()
     line = ""
     for word in words:
-        if len(line + " " + word) < 40:
+        if len(line + " + word) < 40:
             line += " " + word if line else word
         else:
             lines.append(line)
@@ -222,19 +222,20 @@ def build_ticket_pdf(ticket):
     c.roundRect((width - qr_size) / 2 - 4 * mm, card_y + 6*mm, qr_size + 8 * mm, qr_size + 8 * mm, 6, fill=1, stroke=0)
     c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, card_y + 10*mm, width=qr_size, height=qr_size, mask="auto")
 
-    # 7. DETAILS
+    # 7. DETAILS - Tighter spacing to fit before footer
     def field(y, label, value):
         c.setFillColor(HexColor("#42d7e9"))
-        c.setFont("Helvetica", 7.5)
+        c.setFont("Helvetica", 7)
         c.drawString(12 * mm, y, label.upper())
         c.setFillColor(HexColor("#ffffff"))
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(12 * mm, y - 5 * mm, str(value)[:35])
-        return y - 13 * mm
+        c.setFont("Helvetica-Bold", 10.5)
+        c.drawString(12 * mm, y - 4.5 * mm, str(value)[:35])
+        return y - 11.5 * mm # Reduced from 13mm
 
-    y = card_y - 4*mm
+    y = card_y - 2*mm # Start slightly higher
     y = field(y, "Guest Name", ticket["name"])
     y = field(y, "Ticket Code", ticket["ticket_code"])
+    y = field(y, "WhatsApp", ticket["whatsapp"])
     y = field(y, "Seat", ticket.get("seat", "General"))
     y = field(y, "Amount", f"NGN {ticket['amount_paid']:,}")
 
@@ -556,6 +557,7 @@ def qr_image(ticket_code):
 @app.route("/ticket_issued/<int:ticket_id>")
 @login_required()
 def ticket_issued(ticket_id):
+    # FIX: Redirect to main ticket page so buttons work immediately
     return redirect(url_for("ticket", ticket_id=ticket_id))
 
 @app.route("/ticket/<int:ticket_id>")
