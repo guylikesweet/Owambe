@@ -3,43 +3,45 @@
 {% block content %}
 <div class="issued-page">
 <div class="card ticket-card">
-  <div class="success-mark">✓</div><span class="eyebrow">TICKET READY</span><h1>Ticket issued</h1>
-  
-  <div class="ticket-details" id="ticket-data">
-    <div><span>Ticket Code</span><strong>{{ ticket.ticket_code }}</strong></div>
-    <div><span>Guest Name</span><strong>{{ ticket.name }}</strong></div>
-    <div><span>WhatsApp</span><strong>{{ ticket.whatsapp }}</strong></div>
-    <div><span>Seat</span><strong>{{ ticket.seat or 'General' }}</strong></div>
-    <div><span>Amount Paid</span><strong>₦{{ "{:,}".format(ticket.amount_paid) }}</strong></div>
-    <div><span>Event</span><strong>{{ event_name }}</strong></div>
-    <div><span>Status</span><strong>{% if ticket.cancelled %}Cancelled{% elif ticket.used %}Used{% else %}Valid{% endif %}</strong></div>
+  <div class="success-mark">✓</div>
+  <span class="eyebrow">TICKET{% if tickets|length > 1 %}S{% endif %} READY</span>
+  <h1>{% if tickets|length > 1 %}{{ tickets|length }} tickets issued{% else %}Ticket issued{% endif %}</h1>
+
+  {% if tickets|length > 1 %}
+  <p class="muted small center">
+    {{ ticket.category }} · Table ID <strong>{{ ticket.table_id }}</strong> · {{ tickets|length }} independent tickets, each with its own QR code.
+  </p>
+  {% endif %}
+
+  {% for t in tickets %}
+  <div class="card ticket-card ticket-subcard" style="margin-top: {% if loop.first %}0{% else %}20px{% endif %};">
+    {% if tickets|length > 1 %}
+    <span class="eyebrow">GUEST {{ loop.index }} OF {{ tickets|length }}</span>
+    {% endif %}
+
+    <div class="ticket-details">
+      <div><span>Ticket Code</span><strong>{{ t.ticket_code }}</strong></div>
+      <div><span>Guest Name</span><strong>{{ t.name }}</strong></div>
+      <div><span>WhatsApp</span><strong>{{ t.whatsapp }}</strong></div>
+      <div><span>Category</span><strong>{{ t.category or 'Regular' }}</strong></div>
+      {% if t.table_id %}<div><span>Seat</span><strong>{{ t.seat or 'General' }}</strong></div>{% endif %}
+      <div><span>Amount Paid</span><strong>₦{{ "{:,}".format(t.amount_paid) }}</strong></div>
+      <div><span>Event</span><strong>{{ event_name }}</strong></div>
+      <div><span>Status</span><strong>{% if t.cancelled %}Cancelled{% elif t.used %}Used{% else %}Valid{% endif %}</strong></div>
+    </div>
+
+    <div class="qr-box"><img src="{{ url_for('qr_image', ticket_code=t.ticket_code) }}" width="220" height="220" alt="Ticket QR code for {{ t.name }}"></div>
+
+    <a href="{{ url_for('qr_image', ticket_code=t.ticket_code) }}" download="owambe_{{ t.ticket_code }}.png" class="btn secondary">Download QR Code</a>
+
+    <div class="stack-actions" style="margin-top:12px">
+      <a href="{{ url_for('send_ticket_whatsapp', ticket_id=t.id) }}" target="_blank" class="btn">📲 Send Ticket via WhatsApp</a>
+      <a href="{{ url_for('ticket_pdf', ticket_id=t.id) }}" target="_blank" class="btn secondary">📄 Download Ticket PDF</a>
+    </div>
   </div>
+  {% endfor %}
 
-  <div class="qr-box"><img src="{{ url_for('qr_image', ticket_code=ticket.ticket_code) }}" width="220" height="220" alt="Ticket QR code"></div>
-  
-  <a href="{{ url_for('qr_image', ticket_code=ticket.ticket_code) }}" download="owambe_{{ ticket.ticket_code }}.png" class="btn secondary">Download QR Code</a>
-
-  <!-- FIXED BUTTONS -->
-  <div class="stack-actions" style="margin-top:12px">
-    <a href="{{ url_for('send_ticket_whatsapp', ticket_id=ticket.id) }}" target="_blank" class="btn">📲 Send Ticket via WhatsApp</a>
-    <a href="{{ url_for('ticket_pdf', ticket_id=ticket.id) }}" target="_blank" class="btn secondary">📄 Download Ticket PDF</a>
-  </div>
-
-  <p class="muted small center">Send this QR code to the guest. Any seller can find the ticket again from All Tickets.</p>
+  <p class="muted small center" style="margin-top:16px">Send each QR code to its guest individually. Any seller can find these tickets again from All Tickets.</p>
   <div class="stack-actions"><a href="{{ url_for('sell') }}" class="btn">Sell Another Ticket</a><a href="{{ url_for('home') }}" class="btn secondary">Back Home</a></div>
 </div></div>
-
-<script>
-// We no longer need JS for WhatsApp/PDF because we use direct links now
-// But keep this if you use it elsewhere
-const currentTicket = {
-    ticket_id: "{{ ticket.id }}", // FIX: use DB id not ticket_code
-    ticket_code: "{{ ticket.ticket_code }}",
-    event_name: "{{ event_name }}",
-    guest_name: "{{ ticket.name }}",
-    phone: "{{ ticket.whatsapp }}",
-    amount: "{{ "{:,}".format(ticket.amount_paid) }}",
-    status: "{{ 'Cancelled' if ticket.cancelled else 'Used' if ticket.used else 'Valid' }}"
-};
-</script>
 {% endblock %}
