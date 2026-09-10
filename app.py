@@ -291,38 +291,38 @@ def build_ticket_pdf(ticket):
     # 7. FOOTER — dedicated area with no overlap
     footer_divider_y = card_y + 31 * mm
 
-c.setStrokeColor(HexColor("#D4AF37"))
-c.setLineWidth(1)
-c.setDash(3, 3)
-c.line(
-    10 * mm,
-    footer_divider_y,
-    width - 10 * mm,
-    footer_divider_y
-)
-c.setDash()
-
-# Gate instruction - moved 1mm closer to line
-gate_y = footer_divider_y - 4 * mm  # was 5.5mm
-
-c.setFillColor(HexColor("#D4AF37"))
-c.setFont("Helvetica-Bold", 7.5)
-c.drawCentredString(
-    width / 2,
-    gate_y,
-    "PRESENT TICKET AT THE GATE"
-)
-
-# Issue date/time and seller - moved 1.5mm closer
-issued_y = gate_y - 5.5 * mm  # was 7mm
-
-c.setFillColor(HexColor("#a8c1c8"))
-c.setFont("Helvetica", 5.8)
-c.drawCentredString(
-    width / 2,
-    issued_y,
-    f"Issued: {ticket['created_at']} | Seller: {ticket.get('username', '')}"
-)
+    c.setStrokeColor(HexColor("#D4AF37"))
+    c.setLineWidth(1)
+    c.setDash(3, 3)
+    c.line(
+        10 * mm,
+        footer_divider_y,
+        width - 10 * mm,
+        footer_divider_y
+    )
+    c.setDash()
+    
+    # Gate instruction - moved 1mm closer to line
+    gate_y = footer_divider_y - 4 * mm  # was 5.5mm
+    
+    c.setFillColor(HexColor("#D4AF37"))
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString(
+        width / 2,
+        gate_y,
+        "PRESENT TICKET AT THE GATE"
+    )
+    
+    # Issue date/time and seller - moved 1.5mm closer
+    issued_y = gate_y - 5.5 * mm  # was 7mm
+    
+    c.setFillColor(HexColor("#a8c1c8"))
+    c.setFont("Helvetica", 5.8)
+    c.drawCentredString(
+        width / 2,
+        issued_y,
+        f"Issued: {ticket['created_at']} | Seller: {ticket.get('username', '')}"
+    )
 
 # Security warning - moved 1mm closer
 warning_y = issued_y - 5 * mm  # was 6mm
