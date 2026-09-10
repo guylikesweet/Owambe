@@ -11,7 +11,7 @@
 </div>
 
 <form class="search-bar" method="get">
-  <input type="text" name="q" value="{{ q }}" placeholder="Search name, WhatsApp, ticket code or ID">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search name, WhatsApp, ticket code, table ID or ID">
   <button type="submit">Search</button>
 </form>
 
@@ -26,6 +26,7 @@
       <tr>
         <th>Ticket Code</th>
         <th>Name</th>
+        <th>Category</th>
         <th>WhatsApp</th>
         <th>Sold By</th>
         <th>Sold</th>
@@ -38,6 +39,10 @@
       <tr>
         <td data-label="Ticket Code"><strong>{{ t.ticket_code }}</strong></td>
         <td data-label="Name">{{ t.name }}</td>
+        <td data-label="Category">
+          {{ t.category or 'Regular' }}
+          {% if t.table_id %}<br><span class="muted small">{{ t.seat }} · {{ t.table_id }}</span>{% endif %}
+        </td>
         <td data-label="WhatsApp">{{ t.whatsapp }}</td>
         <td data-label="Sold By">{{ t.username or 'Unknown / removed' }}</td>
         <td data-label="Sold">{{ t.created_at }} WAT</td>
@@ -68,7 +73,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="empty-cell">No tickets match.</td></tr>
+      <tr><td colspan="8" class="empty-cell">No tickets match.</td></tr>
     {% endfor %}
     </tbody>
   </table>
