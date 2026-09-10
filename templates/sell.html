@@ -2,7 +2,7 @@
 {% block title %}Sell Tickets · {{ event_name }}{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <div><span class="eyebrow">TICKET SALES</span><h1>Issue a ticket</h1><p>Current ticket price: <strong>₦{{ "{:,}".format(price) }}</strong></p></div>
+  <div><span class="eyebrow">TICKET SALES</span><h1>Issue a ticket</h1><p>Select a category below to see its price.</p></div>
   <a href="{{ url_for('home') }}" class="btn secondary">Home</a>
 </div>
 
@@ -14,14 +14,20 @@
 
 <div class="card form-card">
   <form id="issue-form" method="post">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label for="name">Guest Name</label>
-    <input type="text" id="name" name="name" placeholder="e.g. Ibrahim Bolanle" required>
-    <label for="whatsapp">WhatsApp Number</label>
-    <input type="tel" id="whatsapp" name="whatsapp" placeholder="e.g. 08012345678" required>
-    <label>Amount</label>
-    <input type="text" value="₦{{ "{:,}".format(price) }}" disabled>
-    <button type="submit">Review &amp; Issue Ticket</button>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="category">Ticket Category</label>
+    <select id="category" name="category">
+      {% for label in categories.keys() %}
+      <option value="{{ label }}">{{ label }}{% if categories[label] > 1 %} (party of {{ categories[label] }}){% endif %} — ₦{{ "{:,}".format(prices[label]) }} per ticket</option>
+      {% endfor %}
+    </select>
+
+    <p class="muted small" id="category-hint"></p>
+
+    <div id="guest-fields"></div>
+
+    <button type="submit">Review &amp; Issue Ticket<span id="submit-plural">s</span></button>
   </form>
 </div>
 
@@ -31,7 +37,7 @@
   <div class="ticket-list">
   {% for t in recent %}
     <article class="ticket-row">
-      <div><strong>{{ t.ticket_code }}</strong><span>{{ t.name }} · {{ t.whatsapp }}</span></div>
+      <div><strong>{{ t.ticket_code }}</strong><span>{{ t.name }} · {{ t.whatsapp }} · {{ t.category or "Regular" }}</span></div>
       <a href="{{ url_for('qr_image', ticket_code=t.ticket_code) }}" download="owambe_{{ t.ticket_code }}.png">Download QR</a>
     </article>
   {% else %}<div class="empty-state">No tickets sold yet.</div>{% endfor %}
@@ -42,28 +48,113 @@
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <span class="eyebrow">CROSS-CHECK BEFORE ISSUING</span>
     <h2 id="confirm-title">Are these guest details correct?</h2>
-    <div class="review-grid">
-      <div><span>Guest name</span><strong id="review-name"></strong></div>
-      <div><span>WhatsApp</span><strong id="review-whatsapp"></strong></div>
-      <div><span>Amount</span><strong>₦{{ "{:,}".format(price) }}</strong></div>
-    </div>
+    <div class="review-grid" id="review-grid"></div>
     <p class="muted small">Nothing will be issued until you confirm.</p>
     <div class="modal-actions"><button type="button" class="btn secondary" id="cancel-review">Go back</button><button type="button" class="btn" id="confirm-review">I'M SURE</button></div>
   </div>
 </div>
+
 <script>
+// seats per category label, e.g. {"Regular": 1, "Table of 4": 4, ...}
+const CATEGORY_SEATS = {{ categories | tojson }};
+// price per ticket for each category label
+const CATEGORY_PRICES = {{ prices | tojson }};
+
+const categorySelect = document.getElementById('category');
+const guestFieldsContainer = document.getElementById('guest-fields');
+const categoryHint = document.getElementById('category-hint');
+const submitPlural = document.getElementById('submit-plural');
+
+function money(n) {
+  return '₦' + Number(n).toLocaleString('en-NG');
+}
+
+function renderGuestFields() {
+  const category = categorySelect.value;
+  const seats = CATEGORY_SEATS[category] || 1;
+  const price = CATEGORY_PRICES[category] || 0;
+
+  guestFieldsContainer.innerHTML = '';
+
+  if (seats === 1) {
+    submitPlural.textContent = '';
+    categoryHint.textContent = `Amount: ${money(price)}`;
+    const block = document.createElement('div');
+    block.innerHTML = `
+      <label for="name">Guest Name</label>
+      <input type="text" id="name" name="name" placeholder="e.g. Ibrahim Bolanle" required>
+      <label for="whatsapp">WhatsApp Number</label>
+      <input type="tel" id="whatsapp" name="whatsapp" placeholder="e.g. 08012345678" required>
+      <label>Amount</label>
+      <input type="text" value="${money(price)}" disabled>
+    `;
+    guestFieldsContainer.appendChild(block);
+    return;
+  }
+
+  submitPlural.textContent = 's';
+  categoryHint.textContent = `${seats} separate tickets will be issued, each billed at ${money(price)} (total ${money(price * seats)}). Every guest gets their own ticket and QR code.`;
+
+  for (let i = 1; i <= seats; i++) {
+    const block = document.createElement('div');
+    block.className = 'guest-block';
+    block.innerHTML = `
+      <h3 class="guest-block-title">Guest ${i} of ${seats}</h3>
+      <label for="guest_name_${i}">Guest Name</label>
+      <input type="text" id="guest_name_${i}" name="guest_name_${i}" placeholder="e.g. Ibrahim Bolanle" required>
+      <label for="guest_whatsapp_${i}">WhatsApp Number</label>
+      <input type="tel" id="guest_whatsapp_${i}" name="guest_whatsapp_${i}" placeholder="e.g. 08012345678" required>
+    `;
+    guestFieldsContainer.appendChild(block);
+  }
+}
+
+categorySelect.addEventListener('change', renderGuestFields);
+renderGuestFields();
+
 const issueForm = document.getElementById('issue-form');
 const confirmModal = document.getElementById('confirm-modal');
-const nameInput = document.getElementById('name');
-const whatsappInput = document.getElementById('whatsapp');
+const reviewGrid = document.getElementById('review-grid');
+
 issueForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (!issueForm.reportValidity()) return;
-  document.getElementById('review-name').textContent = nameInput.value.trim();
-  document.getElementById('review-whatsapp').textContent = whatsappInput.value.trim();
+
+  const category = categorySelect.value;
+  const seats = CATEGORY_SEATS[category] || 1;
+  const price = CATEGORY_PRICES[category] || 0;
+
+  reviewGrid.innerHTML = '';
+  const catRow = document.createElement('div');
+  catRow.innerHTML = `<span>Category</span><strong>${category}</strong>`;
+  reviewGrid.appendChild(catRow);
+
+  if (seats === 1) {
+    const name = document.getElementById('name').value.trim();
+    const whatsapp = document.getElementById('whatsapp').value.trim();
+    reviewGrid.innerHTML += `
+      <div><span>Guest name</span><strong>${name}</strong></div>
+      <div><span>WhatsApp</span><strong>${whatsapp}</strong></div>
+      <div><span>Amount</span><strong>${money(price)}</strong></div>
+    `;
+  } else {
+    for (let i = 1; i <= seats; i++) {
+      const name = document.getElementById(`guest_name_${i}`).value.trim();
+      const whatsapp = document.getElementById(`guest_whatsapp_${i}`).value.trim();
+      reviewGrid.innerHTML += `
+        <div><span>Guest ${i} name</span><strong>${name}</strong></div>
+        <div><span>Guest ${i} WhatsApp</span><strong>${whatsapp}</strong></div>
+      `;
+    }
+    const totalRow = document.createElement('div');
+    totalRow.innerHTML = `<span>Total (${seats} tickets)</span><strong>${money(price * seats)}</strong>`;
+    reviewGrid.appendChild(totalRow);
+  }
+
   confirmModal.hidden = false;
   document.body.classList.add('modal-open');
 });
+
 document.getElementById('cancel-review').addEventListener('click', () => { confirmModal.hidden = true; document.body.classList.remove('modal-open'); });
 document.getElementById('confirm-review').addEventListener('click', () => { issueForm.submit(); });
 </script>
