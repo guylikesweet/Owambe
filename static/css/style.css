@@ -337,3 +337,78 @@ td strong { color:var(--cyan); }
         width: 100%;
     }
 }
+
+/* === NEW: TABLE VARIATION TICKETS === */
+
+/* Sell page: repeated guest field blocks for table categories */
+.guest-block {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px dashed var(--line);
+}
+.guest-block:first-child {
+    margin-top: 18px;
+    padding-top: 0;
+    border-top: 0;
+}
+.guest-block-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 15px;
+    color: var(--cyan);
+    margin: 0 0 4px;
+}
+
+/* Ticket issued page: one sub-card per guest ticket */
+.ticket-subcard {
+    text-align: center;
+}
+.ticket-subcard .ticket-details {
+    margin-top: 18px;
+}
+
+/* Single ticket view: table membership note */
+.table-note {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    margin: 0 0 14px;
+}
+.table-note a {
+    color: var(--cyan);
+}
+
+/* Admin report: per-category pricing form */
+.pricing-form {
+    display: grid;
+    gap: 4px;
+}
+.pricing-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0;
+}
+.pricing-row label {
+    margin: 0;
+    flex: 1;
+}
+.pricing-row input {
+    width: 140px;
+    flex: 0 0 auto;
+}
+.pricing-form button {
+    margin-top: 16px;
+}
+
+@media (max-width: 720px) {
+    .pricing-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        margin-bottom: 14px;
+    }
+    .pricing-row input {
+        width: 100%;
+    }
+                                                                                }
