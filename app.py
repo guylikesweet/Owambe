@@ -90,7 +90,6 @@ def init_db():
     query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, seat TEXT DEFAULT 'General', used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
     query("""CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
     query("""CREATE TABLE IF NOT EXISTS ticket_audit (id SERIAL PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets (id), action TEXT NOT NULL, performed_by INTEGER REFERENCES users (id), detail TEXT, created_at TEXT)""")
-
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
@@ -106,7 +105,6 @@ def init_db():
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded_by INTEGER REFERENCES users(id)")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_sent_at TEXT")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS send_count INTEGER NOT NULL DEFAULT 0")
-
     missing = query("SELECT id FROM tickets WHERE ticket_code IS NULL OR ticket_code = ''").fetchall()
     for row in missing:
         code = generate_ticket_code()
@@ -153,98 +151,100 @@ def build_ticket_pdf(ticket):
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
 
-    # 1. FULL FLIER BACKGROUND like ticket.html
+    # 1. BACKGROUND
     try:
-        bg_path = "static/img/owambe-flyer.jpg"
-        bg_img = ImageReader(bg_path)
+        bg_img = ImageReader("static/img/owambe-flyer.jpg")
         c.drawImage(bg_img, 0, 0, width=width, height=height, mask='auto')
     except:
         c.setFillColor(HexColor("#0b1f2b"))
         c.rect(0, 0, width, height, fill=1, stroke=0)
 
-    # 2. DARK OVERLAY like.owambe-ticket background
+    # 2. DARK OVERLAY
     c.setFillColor(HexColor("#0b1f2b"))
-    c.setFillAlpha(0.90)
+    c.setFillAlpha(0.88)
     c.rect(0, 0, width, height, fill=1, stroke=0)
     c.setFillAlpha(1.0)
 
-    # 3. GOLD BORDER CARD like.owambe-ticket
-    card_w = width - 16*mm
-    card_h = height - 35*mm
+    # 3. GOLD BORDER CARD
+    card_x, card_y, card_w, card_h = 6*mm, 12*mm, width-12*mm, height-28*mm
     c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(2.5)
-    c.roundRect(8*mm, 15*mm, card_w, card_h, 16, fill=0, stroke=1)
+    c.setLineWidth(2.2)
+    c.roundRect(card_x, card_y, card_w, card_h, 14, fill=0, stroke=1)
 
     # 4. LOGO
     try:
         logo_img = ImageReader("static/img/owambe-logo.png")
-        c.drawImage(logo_img, (width-50*mm)/2, height-30*mm, width=50*mm, height=18*mm, mask='auto')
+        c.drawImage(logo_img, (width-48*mm)/2, height-26*mm, width=48*mm, height=16*mm, mask='auto')
     except: pass
 
     # 5. EVENT TITLE
     c.setFillColor(HexColor("#FFFFFF"))
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(width/2, height-38*mm, EVENT_NAME)
+    c.setFont("Helvetica-Bold", 9.5)
+    c.drawCentredString(width/2, height-34*mm, "Bioelites Class of 26'")
+    c.drawCentredString(width/2, height-39*mm, "Owambe Experience and Award Ceremony")
 
-    # 6. QR CODE in white box with gold border
+    # 6. QR CODE
     qr_data = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
     qr_img = qrcode.make(qr_data)
     qr_buf = io.BytesIO()
     qr_img.save(qr_buf, format="PNG")
     qr_buf.seek(0)
-    qr_size = 50 * mm
+    qr_size = 48 * mm
+    qr_y = height-92*mm
     c.setFillColor(HexColor("#ffffff"))
-    c.roundRect((width-qr_size)/2-3*mm, height-98*mm, qr_size+6*mm, qr_size+6*mm, 12, fill=1, stroke=0)
+    c.roundRect((width-qr_size)/2-3*mm, qr_y, qr_size+6*mm, qr_size+6*mm, 10, fill=1, stroke=0)
     c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(2)
-    c.roundRect((width-qr_size)/2-3*mm, height-98*mm, qr_size+6*mm, qr_size+6*mm, 12, fill=0, stroke=1)
-    c.drawImage(ImageReader(qr_buf), (width-qr_size)/2, height-95*mm, width=qr_size, height=qr_size, mask="auto")
+    c.setLineWidth(1.8)
+    c.roundRect((width-qr_size)/2-3*mm, qr_y, qr_size+6*mm, qr_size+6*mm, 10, fill=0, stroke=1)
+    c.drawImage(ImageReader(qr_buf), (width-qr_size)/2, qr_y+3*mm, width=qr_size, height=qr_size, mask="auto")
 
-    # 7. DETAILS BOX like.details-box
-    details_y = height-108*mm
+    # 7. DETAILS LAYER - Well positioned with 12mm gap before footer
+    details_top = qr_y - 5*mm
+    details_height = 52*mm
     c.setFillColor(HexColor("#000"))
-    c.setFillAlpha(0.25)
-    c.roundRect(12*mm, details_y-50*mm, card_w-8*mm, 48*mm, 10, fill=1, stroke=0)
+    c.setFillAlpha(0.32)
+    c.roundRect(10*mm, details_top-details_height, card_w-8*mm, details_height, 8, fill=1, stroke=0)
     c.setFillAlpha(1.0)
 
     def field(y, label, value):
         c.setFillColor(HexColor("#42d7e9"))
-        c.setFont("Helvetica", 7.5)
-        c.drawString(16*mm, y, label.upper())
+        c.setFont("Helvetica", 6.8)
+        c.drawString(14*mm, y, label)
         c.setFillColor(HexColor("#FFFFFF"))
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(16*mm, y-5*mm, str(value)[:40])
-        return y - 12*mm
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(14*mm, y-4.2*mm, str(value)[:38])
+        return y - 10.5*mm
 
-    y = details_y - 6*mm
-    y = field(y, "Guest Name", ticket["name"])
-    y = field(y, "Ticket Code", ticket["ticket_code"])
-    y = field(y, "WhatsApp", ticket["whatsapp"])
+    y = details_top - 6*mm
+    y = field(y, "GUEST NAME", ticket["name"])
+    y = field(y, "TICKET CODE", ticket["ticket_code"])
+    y = field(y, "WHATSAPP", ticket["whatsapp"])
+    y = field(y, "SEAT", ticket.get("seat", "General"))
+    y = field(y, "AMOUNT PAID", f"NGN {ticket['amount_paid']:,}")
 
-    c.setDash(2,2)
+    # 8. DASHED DIVIDER BEFORE FOOTER - 12mm gap
+    divider_y = 28*mm
     c.setStrokeColor(HexColor("#D4AF37"))
-    c.line(16*mm, y+2*mm, width-16*mm, y+2*mm)
+    c.setLineWidth(1)
+    c.setDash(3, 3)
+    c.line(10*mm, divider_y, width-10*mm, divider_y)
     c.setDash()
-    y -= 6*mm
 
-    y = field(y, "Seat", ticket.get("seat", "General"))
-    y = field(y, "Amount Paid", f"NGN {ticket['amount_paid']:,}")
-
-    # 8. ADMIT LINE
+    # 9. ADMIT LINE
     c.setFillColor(HexColor("#D4AF37"))
-    c.setFont("Helvetica-Bold", 8)
-    c.drawCentredString(width/2, 22*mm, "ADMIT ONE • PRESENT QR AT GATE")
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString(width/2, 23*mm, "ADMIT ONE • PRESENT QR AT GATE")
 
-    # 9. FOOTER
+    # 10. FOOTER - well below details
     c.setFillColor(HexColor("#a8c1c8"))
-    c.setFont("Helvetica", 6.5)
+    c.setFont("Helvetica", 6)
     c.drawCentredString(width/2, 16*mm, f"Issued: {ticket['created_at']} | Seller: {ticket.get('username','')}")
 
     # CANCELLED WATERMARK
     if ticket.get("cancelled"):
         c.saveState()
         c.setFillColor(HexColor("#ed5b63"))
-        c.setFont("Helvetica-Bold", 36)
+        c.setFont("Helvetica-Bold", 32)
         c.translate(width/2, height/2)
         c.rotate(20)
         c.drawCentredString(0, 0, "CANCELLED")
