@@ -20,6 +20,19 @@
   <div><a href="{{ url_for('scan') }}">Scanner</a>{% if user.role == 'admin' %} · <a href="{{ url_for('export_csv') }}">Export CSV</a>{% endif %}</div>
 </div>
 
+<style>
+  /* Visually group consecutive rows that share a table_id, so a table's
+     guests are obvious at a glance without changing the table structure. */
+  tr.table-grouped td {
+    border-left: 3px solid var(--accent, #D4AF37);
+    background: rgba(212, 175, 55, 0.06);
+  }
+  a.table-id-link {
+    font-weight: 600;
+    text-decoration: underline;
+  }
+</style>
+
 <div class="table-wrap">
   <table>
     <thead>
@@ -36,12 +49,18 @@
     </thead>
     <tbody>
     {% for t in tickets %}
-      <tr>
+      <tr{% if t.table_id %} class="table-grouped"{% endif %}>
         <td data-label="Ticket Code"><strong>{{ t.ticket_code }}</strong></td>
         <td data-label="Name">{{ t.name }}</td>
         <td data-label="Category">
           {{ t.category or 'Regular' }}
-          {% if t.table_id %}<br><span class="muted small">{{ t.seat }} · {{ t.table_id }}</span>{% endif %}
+          {% if t.table_id %}
+            <br>
+            <span class="muted small">
+              {{ t.seat }} ·
+              <a class="table-id-link" href="{{ url_for('all_tickets', q=t.table_id) }}" title="See everyone on this table">{{ t.table_id }}</a>
+            </span>
+          {% endif %}
         </td>
         <td data-label="WhatsApp">{{ t.whatsapp }}</td>
         <td data-label="Sold By">{{ t.username or 'Unknown / removed' }}</td>
