@@ -1,38 +1,121 @@
 {% extends "base.html" %}
-{% block title %}Ticket Check · {{ event_name }}{% endblock %}
-{% block tagline %}Ticket Verification{% endblock %}
+{% block title %}Ticket · {{ ticket.name if ticket else 'Invalid' }}{% endblock %}
+{% block tagline %}Owambe Ticket{% endblock %}
 
 {% block content %}
-<div class="card">
+<style>
+    .owambe-ticket {
+        max-width: 420px;
+        margin: 0 auto;
+        background: rgba(26, 47, 58, 0.88);
+        border: 2px solid #D4AF37;
+        border-radius: 16px;
+        padding: 24px;
+        text-align: center;
+        backdrop-filter: blur(4px);
+        position: relative;
+        overflow: hidden;
+    }
+    .owambe-ticket::before { /* flier background */
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: url("{{ url_for('static', filename='img/owambe-flier.jpg') }}") center/cover no-repeat;
+        opacity: 0.18;
+        z-index: -1;
+    }
+    .owambe-logo {
+        width: 160px;
+        margin: 0 auto 8px;
+    }
+    .event-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: #fff;
+        line-height: 1.3;
+    }
+    .qr-wrap {
+        background: white;
+        padding: 12px;
+        border-radius: 12px;
+        margin: 18px auto;
+        display: inline-block;
+    }
+    .qr-wrap img { width: 200px; height: 200px; display: block; }
+    .owambe-field {
+        text-align: left;
+        margin: 14px 0;
+        padding-bottom: 8px;
+        border-bottom: 1px dashed rgba(212, 175, 55, 0.3);
+    }
+    .owambe-field .k {
+        font-size: 10px;
+        color: #42d7e9;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 2px;
+    }
+    .owambe-field .v {
+        font-size: 16px;
+        font-weight: 700;
+        color: white;
+    }
+    .admit-line {
+        color: #D4AF37;
+        font-weight: 700;
+        font-size: 11px;
+        margin: 16px 0;
+        letter-spacing: 0.5px;
+    }
+    .ticket-footer {
+        font-size: 10px;
+        color: #a8c1c8;
+        margin-top: 10px;
+    }
+    .status-banner {
+        padding: 8px;
+        border-radius: 8px;
+        font-weight: 700;
+        margin-bottom: 16px;
+    }
+    .status-banner.valid { background: rgba(66, 215, 233, 0.15); color: #42d7e9; }
+    .status-banner.cancelled { background: rgba(237, 91, 99, 0.15); color: #ed5b63; }
+    .status-banner.used { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+</style>
+
+<div class="owambe-ticket">
   {% if ticket %}
-    <div class="status-block">
-      <div class="status-icon">✅</div>
-      <div class="status-title {{ 'invalid' if ticket.status == 'cancelled' else 'valid' }}">
-        {{ 'TICKET CANCELLED' if ticket.status == 'cancelled' else 'TICKET VALID' }}
-      </div>
-    </div>
-    
-    <div class="ticket-details" id="ticket-data">
-      <div class="field"><span class="k">Ticket ID</span><div class="v">{{ ticket.id }}</div></div>
-      <div class="field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
-      <div class="field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
-      <div class="field"><span class="k">Amount Paid</span><div class="v">₦{{ "{:,}".format(ticket.amount_paid) }}</div></div>
-      <div class="field"><span class="k">Event</span><div class="v">{{ event_name }}</div></div>
-      <div class="field">
-        <span class="k">Door Status</span>
-        <div class="v">
-          {% if ticket.status == 'cancelled' %}
-            <span class="badge danger">Cancelled</span>
-          {% elif ticket.used %}
-            <span class="badge used">Already checked in — {{ ticket.used_at }}</span>
-          {% else %}
-            <span class="badge valid">Not yet checked in</span>
-          {% endif %}
-        </div>
-      </div>
+    <!-- STATUS -->
+    <div class="status-banner {{ 'cancelled' if ticket.status == 'cancelled' else 'used' if ticket.used else 'valid' }}">
+      {% if ticket.status == 'cancelled' %} TICKET CANCELLED 
+      {% elif ticket.used %} ALREADY CHECKED IN 
+      {% else %} TICKET VALID {% endif %}
     </div>
 
-    <!-- NEW ACTIONS -->
+    <!-- LOGO -->
+    <img src="{{ url_for('static', filename='img/owambe-logo.png') }}" class="owambe-logo" alt="Owambe Logo">
+
+    <!-- EVENT -->
+    <div class="event-title">{{ event_name }}</div>
+
+    <!-- QR -->
+    <div class="qr-wrap">
+        <img src="data:image/png;base64,{{ qr_base64 }}" alt="QR Code">
+    </div>
+
+    <!-- DETAILS -->
+    <div class="owambe-field"><span class="k">Ticket Code</span><div class="v">{{ ticket.id }}</div></div>
+    <div class="owambe-field"><span class="k">Guest Name</span><div class="v">{{ ticket.name }}</div></div>
+    <div class="owambe-field"><span class="k">WhatsApp</span><div class="v">{{ ticket.whatsapp }}</div></div>
+    <div class="owambe-field"><span class="k">Amount Paid</span><div class="v">₦{{ "{:,}".format(ticket.amount_paid) }}</div></div>
+
+    <div class="admit-line">ADMIT ONE • PRESENT QR AT GATE</div>
+    
+    <div class="ticket-footer">
+      Issued: {{ ticket.created_at }} | Status: {{ ticket.status }}
+    </div>
+
+    <!-- ACTIONS -->
     <div class="stack-actions" style="margin-top:20px">
       {% if ticket.status != 'cancelled' %}
       <button class="btn" onclick="handleTicketAction('wa')">Send Ticket via WhatsApp</button>
@@ -45,29 +128,27 @@
       {% endif %}
     </div>
 
-    <p style="text-align:center; color:var(--muted); font-size:12px; margin-top:20px;">
-      This page confirms a ticket exists in the system. Check the guest in from the Scanner page at the door.
-    </p>
   {% else %}
-    <div class="status-block">
-      <div class="status-icon">❌</div>
-      <div class="status-title invalid">INVALID TICKET</div>
-    </div>
+    <div class="status-banner cancelled">INVALID TICKET</div>
     <p style="text-align:center; color:var(--muted); font-size:13px;">
-      Ticket ID <b>{{ ticket_id }}</b> was not found. This is not a valid ticket for {{ event_name }}.
+      Ticket ID <b>{{ ticket_id }}</b> was not found.
     </p>
   {% endif %}
 </div>
 
 <script>
-// Build ticket object from template
+// Build ticket object from template - updated to match new pdf_generator.js
 const currentTicket = {
     ticket_id: "{{ ticket.id if ticket else ticket_id }}",
+    ticket_code: "{{ ticket.id if ticket else ticket_id }}",
     event_name: "{{ event_name }}",
     guest_name: "{{ ticket.name if ticket else '' }}",
     phone: "{{ ticket.whatsapp if ticket else '' }}",
-    amount: "{{ "{:,}".format(ticket.amount_paid) if ticket else '0' }}",
-    status: "{{ ticket.status if ticket else 'invalid' }}"
+    amount_paid: "{{ ticket.amount_paid if ticket else '0' }}",
+    seat: "General",
+    status: "{{ ticket.status if ticket else 'invalid' }}",
+    created_at: "{{ ticket.created_at if ticket else '' }}",
+    cancelled: {{ 'true' if ticket and ticket.status == 'cancelled' else 'false' }}
 };
 
 function handleTicketAction(action) {
