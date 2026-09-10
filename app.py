@@ -291,57 +291,57 @@ def build_ticket_pdf(ticket):
     # 7. FOOTER — dedicated area with no overlap
     footer_divider_y = card_y + 31 * mm
 
-    c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(1)
-    c.setDash(3, 3)
-    c.line(
-        10 * mm,
-        footer_divider_y,
-        width - 10 * mm,
-        footer_divider_y
-    )
-    c.setDash()
+c.setStrokeColor(HexColor("#D4AF37"))
+c.setLineWidth(1)
+c.setDash(3, 3)
+c.line(
+    10 * mm,
+    footer_divider_y,
+    width - 10 * mm,
+    footer_divider_y
+)
+c.setDash()
 
-    # Gate instruction
-    gate_y = footer_divider_y - 5.5 * mm
+# Gate instruction - moved 1mm closer to line
+gate_y = footer_divider_y - 4 * mm  # was 5.5mm
 
-    c.setFillColor(HexColor("#D4AF37"))
-    c.setFont("Helvetica-Bold", 7.5)
-    c.drawCentredString(
-        width / 2,
-        gate_y,
-        "PRESENT TICKET AT THE GATE"
-    )
+c.setFillColor(HexColor("#D4AF37"))
+c.setFont("Helvetica-Bold", 7.5)
+c.drawCentredString(
+    width / 2,
+    gate_y,
+    "PRESENT TICKET AT THE GATE"
+)
 
-    # Issue date/time and seller
-    issued_y = gate_y - 7 * mm
+# Issue date/time and seller - moved 1.5mm closer
+issued_y = gate_y - 5.5 * mm  # was 7mm
 
-    c.setFillColor(HexColor("#a8c1c8"))
-    c.setFont("Helvetica", 5.8)
-    c.drawCentredString(
-        width / 2,
-        issued_y,
-        f"Issued: {ticket['created_at']} | Seller: {ticket.get('username', '')}"
-    )
+c.setFillColor(HexColor("#a8c1c8"))
+c.setFont("Helvetica", 5.8)
+c.drawCentredString(
+    width / 2,
+    issued_y,
+    f"Issued: {ticket['created_at']} | Seller: {ticket.get('username', '')}"
+)
 
-    # Security warning
-    warning_y = issued_y - 6 * mm
+# Security warning - moved 1mm closer
+warning_y = issued_y - 5 * mm  # was 6mm
 
-    c.setFillColor(HexColor("#ed5b63"))
-    c.setFont("Helvetica-Bold", 5.7)
-    c.drawCentredString(
-        width / 2,
-        warning_y,
-        "WARNING: DO NOT SHARE YOUR TICKET DETAILS."
-    )
+c.setFillColor(HexColor("#ed5b63"))
+c.setFont("Helvetica-Bold", 5.7)
+c.drawCentredString(
+    width / 2,
+    warning_y,
+    "WARNING: DO NOT SHARE YOUR TICKET DETAILS."
+)
 
-    c.setFillColor(HexColor("#a8c1c8"))
-    c.setFont("Helvetica", 5.1)
-    c.drawCentredString(
-        width / 2,
-        warning_y - 3.5 * mm,
-        "Sharing your ticket details may allow someone else to steal or use your ticket."
-    )
+c.setFillColor(HexColor("#a8c1c8"))
+c.setFont("Helvetica", 5.1)
+c.drawCentredString(
+    width / 2,
+    warning_y - 3 * mm,  # was 3.5mm
+    "Sharing your ticket details may allow someone else to steal or use your ticket."
+)
 
     # 8. CANCELLED WATERMARK
     if ticket.get("cancelled"):
