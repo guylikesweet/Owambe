@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session, g, flash, Response, abort
-import os, io, csv, secrets, string, re, urllib.parse
+import os, io, csv, secrets, string, re, urllib.parse, base64
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import qrcode
@@ -11,8 +11,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.lib.units import mm
-from reportlab.lib.colors import HexColor
+from reportlab.lib.colors import HexColor, Color
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY")
@@ -152,63 +153,116 @@ def build_ticket_pdf(ticket):
     width, height = 105 * mm, 170 * mm
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
+
+    # 1. FULL FLIER BACKGROUND
+    try:
+        bg_path = "static/img/owambe-flier.jpg"
+        bg_img = ImageReader(bg_path)
+        c.setFillColor(HexColor("#000"))
+        c.rect(0, 0, width, height, fill=1, stroke=0)
+        c.setFillColorAlpha(1, 0.20)
+        c.drawImage(bg_img, 0, 0, width=width, height=height, mask='auto')
+        c.setFillColorAlpha(1, 1)
+    except:
+        c.setFillColor(HexColor("#0b1f2b"))
+        c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # 2. DARK OVERLAY
     c.setFillColor(HexColor("#0b1f2b"))
+    c.setFillColorAlpha(1, 0.80)
     c.rect(0, 0, width, height, fill=1, stroke=0)
-    c.setFillColor(HexColor("#42d7e9"))
-    c.setFont("Helvetica-Bold", 12)
+    c.setFillColorAlpha(1, 1)
+
+    # 3. LOGO
+    try:
+        logo_path = "static/img/owambe-logo.png"
+        logo_img = ImageReader(logo_path)
+        logo_w = 55 * mm
+        logo_h = 22 * mm
+        c.drawImage(logo_img, (width - logo_w)/2, height - 32*mm, width=logo_w, height=logo_h, mask='auto')
+    except:
+        c.setFillColor(HexColor("#D4AF37"))
+        c.setFont("Helvetica-Bold", 20)
+        c.drawCentredString(width/2, height-20*mm, "OWAMBE")
+
+    # 4. EVENT TITLE
+    c.setFillColor(HexColor("#FFFFFF"))
+    c.setFont("Helvetica-Bold", 11)
     lines = []
     words = EVENT_NAME.split()
     line = ""
     for word in words:
-        if len(line + " " + word) < 32:
+        if len(line + " " + word) < 40:
             line += " " + word if line else word
         else:
             lines.append(line)
             line = word
     if line: lines.append(line)
-    y = height - 14 * mm
+    y = height-42*mm
     for l in lines:
-        c.drawCentredString(width / 2, y, l)
-        y -= 6 * mm
+        c.drawCentredString(width/2, y, l)
+        y -= 6*mm
 
-    c.setFillColor(HexColor("#f4fbfd"))
-    c.setFont("Helvetica", 10)
-    c.drawCentredString(width / 2, y - 2 * mm, "Event Ticket")
+    # 5. TICKET CARD
+    card_y = height - 115 * mm
+    c.setFillColor(HexColor("#1a2f3a"))
+    c.setFillColorAlpha(1, 0.88)
+    c.roundRect(8*mm, card_y, width-16*mm, 72*mm, 10, fill=1, stroke=0)
+    c.setFillColorAlpha(1, 1)
+    c.setStrokeColor(HexColor("#D4AF37"))
+    c.setLineWidth(1.8)
+    c.roundRect(8*mm, card_y, width-16*mm, 72*mm, 10, fill=0, stroke=1)
+
+    # 6. QR CODE
     qr_img = qrcode.make(ticket["qr_data"] or ticket["ticket_code"])
     qr_buf = io.BytesIO()
     qr_img.save(qr_buf, format="PNG")
     qr_buf.seek(0)
-    qr_size = 55 * mm
+    qr_size = 52 * mm
     c.setFillColor(HexColor("#ffffff"))
-    c.roundRect((width - qr_size) / 2 - 4 * mm, height - 95 * mm - 4 * mm, qr_size + 8 * mm, qr_size + 8 * mm, 4, fill=1, stroke=0)
-    c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, height - 95 * mm, width=qr_size, height=qr_size, mask="auto")
+    c.roundRect((width - qr_size) / 2 - 4 * mm, card_y + 6*mm, qr_size + 8 * mm, qr_size + 8 * mm, 6, fill=1, stroke=0)
+    c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, card_y + 10*mm, width=qr_size, height=qr_size, mask="auto")
 
+    # 7. DETAILS
     def field(y, label, value):
-        c.setFillColor(HexColor("#a8c1c8"))
+        c.setFillColor(HexColor("#42d7e9"))
         c.setFont("Helvetica", 7.5)
-        c.drawString(10 * mm, y, label.upper())
-        c.setFillColor(HexColor("#f4fbfd"))
+        c.drawString(12 * mm, y, label.upper())
+        c.setFillColor(HexColor("#ffffff"))
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(10 * mm, y - 5 * mm, str(value)[:40])
+        c.drawString(12 * mm, y - 5 * mm, str(value)[:35])
+        return y - 13 * mm
 
-    y = height - 110 * mm
-    field(y, "Ticket Code", ticket["ticket_code"]); y -= 13 * mm
-    field(y, "Guest Name", ticket["name"]); y -= 13 * mm
-    field(y, "WhatsApp", ticket["whatsapp"]); y -= 13 * mm
-    field(y, "Seat", ticket.get("seat", "General")); y -= 13 * mm
-    field(y, "Amount Paid", f"NGN {ticket['amount_paid']:,}")
+    y = card_y - 4*mm
+    y = field(y, "Guest Name", ticket["name"])
+    y = field(y, "Ticket Code", ticket["ticket_code"])
+    y = field(y, "Seat", ticket.get("seat", "General"))
+    y = field(y, "Amount", f"NGN {ticket['amount_paid']:,}")
+
+    # 8. ADMIT LINE
+    c.setStrokeColor(HexColor("#D4AF37"))
+    c.setLineWidth(1)
+    c.setDash(2, 2)
+    c.line(10*mm, 28*mm, width-10*mm, 28*mm)
+    c.setDash()
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(HexColor("#D4AF37"))
+    c.drawCentredString(width/2, 21*mm, "ADMIT ONE • PRESENT QR AT GATE")
+
+    # 9. FOOTER
+    c.setFillColor(HexColor("#a8c1c8"))
+    c.setFont("Helvetica", 6.5)
+    c.drawCentredString(width / 2, 15 * mm, f"Issued: {ticket['created_at']} | Seller: {ticket.get('username','')}")
 
     if ticket.get("cancelled"):
         c.saveState()
         c.setFillColor(HexColor("#ed5b63"))
-        c.setFont("Helvetica-Bold", 26)
-        c.translate(width / 2, 34 * mm)
-        c.rotate(22)
+        c.setFont("Helvetica-Bold", 36)
+        c.translate(width / 2, height / 2)
+        c.rotate(20)
         c.drawCentredString(0, 0, "CANCELLED")
         c.restoreState()
-    c.setFillColor(HexColor("#a8c1c8"))
-    c.setFont("Helvetica", 6.5)
-    c.drawCentredString(width / 2, 8 * mm, "Present this ticket (screen or print) with a valid QR at entry.")
+
     c.showPage()
     c.save()
     buf.seek(0)
@@ -503,18 +557,21 @@ def qr_image(ticket_code):
 @app.route("/ticket_issued/<int:ticket_id>")
 @login_required()
 def ticket_issued(ticket_id):
-    ticket = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s", (ticket_id,)).fetchone()
-    if not ticket:
-        return "Ticket not found", 404
-    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, price=ticket["amount_paid"], qr_exists=True, user=g.user)
+    return redirect(url_for("ticket", ticket_id=ticket_id))
 
 @app.route("/ticket/<int:ticket_id>")
 @login_required()
 def ticket(ticket_id):
-    ticket = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.id = %s", (ticket_id,)).fetchone()
-    if not ticket:
-        abort(404)
-    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, price=ticket["amount_paid"], qr_exists=True, user=g.user)
+    ticket = get_ticket_or_404(ticket_id)
+
+    # Generate QR as base64 for HTML
+    qr_data = f"{request.url_root}t/{ticket['ticket_code']}/pdf"
+    qr = qrcode.make(qr_data)
+    buf = io.BytesIO()
+    qr.save(buf, format="PNG")
+    qr_base64 = base64.b64encode(buf.getvalue()).decode()
+
+    return render_template("ticket.html", ticket=ticket, qr_base64=qr_base64, event_name=EVENT_NAME, user=g.user)
 
 def normalize_phone(raw):
     digits = re.sub(r"\D", "", raw or "")
