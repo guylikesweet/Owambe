@@ -228,8 +228,9 @@ def build_ticket_pdf(ticket):
     y = field(y, "SEAT", ticket.get("seat", "General"))
     y = field(y, "AMOUNT PAID", f"NGN {ticket['amount_paid']:,}")
 
-    # 7. FOOTER - TIGHTER SPACING
-    footer_divider_y = card_y + 31 * mm
+    # 7. FOOTER - MOVED DOWN 6MM
+    footer_divider_y = card_y + 37 * mm # was 31 * mm
+
     c.setStrokeColor(HexColor("#D4AF37"))
     c.setLineWidth(1)
     c.setDash(3, 3)
@@ -237,16 +238,18 @@ def build_ticket_pdf(ticket):
     c.setDash()
 
     gate_y = footer_divider_y - 4 * mm
+
     c.setFillColor(HexColor("#D4AF37"))
     c.setFont("Helvetica-Bold", 7.5)
     c.drawCentredString(width / 2, gate_y, "PRESENT TICKET AT THE GATE")
 
     issued_y = gate_y - 5.5 * mm
+
     c.setFillColor(HexColor("#a8c1c8"))
     c.setFont("Helvetica", 5.8)
     c.drawCentredString(width / 2, issued_y, f"Issued: {ticket['created_at']} | Seller: {ticket.get('username', '')}")
 
-    # Security warning - FIXED INDENT
+    # Security warning
     warning_y = issued_y - 5 * mm
     c.setFillColor(HexColor("#ed5b63"))
     c.setFont("Helvetica-Bold", 5.7)
