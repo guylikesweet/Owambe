@@ -153,112 +153,99 @@ def build_ticket_pdf(ticket):
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
 
-    # 1. FULL FLIER BACKGROUND
+    # 1. FULL FLIER BACKGROUND like ticket.html
     try:
         bg_path = "static/img/owambe-flyer.jpg"
         bg_img = ImageReader(bg_path)
-        c.setFillColor(HexColor("#000"))
-        c.rect(0, 0, width, height, fill=1, stroke=0)
-        c.setFillAlpha(0.20)
         c.drawImage(bg_img, 0, 0, width=width, height=height, mask='auto')
-        c.setFillAlpha(1.0)
     except:
         c.setFillColor(HexColor("#0b1f2b"))
         c.rect(0, 0, width, height, fill=1, stroke=0)
 
-    # 2. DARK OVERLAY
+    # 2. DARK OVERLAY like.owambe-ticket background
     c.setFillColor(HexColor("#0b1f2b"))
-    c.setFillAlpha(0.80)
+    c.setFillAlpha(0.90)
     c.rect(0, 0, width, height, fill=1, stroke=0)
     c.setFillAlpha(1.0)
 
-    # 3. LOGO
-    try:
-        logo_path = "static/img/owambe-logo.png"
-        logo_img = ImageReader(logo_path)
-        logo_w = 55 * mm
-        logo_h = 22 * mm
-        c.drawImage(logo_img, (width - logo_w)/2, height - 32*mm, width=logo_w, height=logo_h, mask='auto')
-    except:
-        c.setFillColor(HexColor("#D4AF37"))
-        c.setFont("Helvetica-Bold", 20)
-        c.drawCentredString(width/2, height-20*mm, "OWAMBE")
-
-    # 4. EVENT TITLE
-    c.setFillColor(HexColor("#FFFFFF"))
-    c.setFont("Helvetica-Bold", 11)
-    lines = []
-    words = EVENT_NAME.split()
-    line = ""
-    for word in words:
-        if len(line + " " + word) < 40:
-            line += " " + word if line else word
-        else:
-            lines.append(line)
-            line = word
-    if line: lines.append(line)
-    y = height-42*mm
-    for l in lines:
-        c.drawCentredString(width/2, y, l)
-        y -= 6*mm
-
-    # 5. TICKET CARD
-    card_y = height - 115 * mm
-    c.setFillColor(HexColor("#1a2f3a"))
-    c.setFillAlpha(0.88)
-    c.roundRect(8*mm, card_y, width-16*mm, 72*mm, 10, fill=1, stroke=0)
-    c.setFillAlpha(1.0)
+    # 3. GOLD BORDER CARD like.owambe-ticket
+    card_w = width - 16*mm
+    card_h = height - 35*mm
     c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(1.8)
-    c.roundRect(8*mm, card_y, width-16*mm, 72*mm, 10, fill=0, stroke=1)
+    c.setLineWidth(2.5)
+    c.roundRect(8*mm, 15*mm, card_w, card_h, 16, fill=0, stroke=1)
 
-    # 6. QR CODE
-    qr_img = qrcode.make(ticket["qr_data"] or ticket["ticket_code"])
+    # 4. LOGO
+    try:
+        logo_img = ImageReader("static/img/owambe-logo.png")
+        c.drawImage(logo_img, (width-50*mm)/2, height-30*mm, width=50*mm, height=18*mm, mask='auto')
+    except: pass
+
+    # 5. EVENT TITLE
+    c.setFillColor(HexColor("#FFFFFF"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(width/2, height-38*mm, EVENT_NAME)
+
+    # 6. QR CODE in white box with gold border
+    qr_data = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
+    qr_img = qrcode.make(qr_data)
     qr_buf = io.BytesIO()
     qr_img.save(qr_buf, format="PNG")
     qr_buf.seek(0)
-    qr_size = 52 * mm
+    qr_size = 50 * mm
     c.setFillColor(HexColor("#ffffff"))
-    c.roundRect((width - qr_size) / 2 - 4 * mm, card_y + 6*mm, qr_size + 8 * mm, qr_size + 8 * mm, 6, fill=1, stroke=0)
-    c.drawImage(ImageReader(qr_buf), (width - qr_size) / 2, card_y + 10*mm, width=qr_size, height=qr_size, mask="auto")
+    c.roundRect((width-qr_size)/2-3*mm, height-98*mm, qr_size+6*mm, qr_size+6*mm, 12, fill=1, stroke=0)
+    c.setStrokeColor(HexColor("#D4AF37"))
+    c.setLineWidth(2)
+    c.roundRect((width-qr_size)/2-3*mm, height-98*mm, qr_size+6*mm, qr_size+6*mm, 12, fill=0, stroke=1)
+    c.drawImage(ImageReader(qr_buf), (width-qr_size)/2, height-95*mm, width=qr_size, height=qr_size, mask="auto")
 
-    # 7. DETAILS - Tighter spacing to fit before footer
+    # 7. DETAILS BOX like.details-box
+    details_y = height-108*mm
+    c.setFillColor(HexColor("#000"))
+    c.setFillAlpha(0.25)
+    c.roundRect(12*mm, details_y-50*mm, card_w-8*mm, 48*mm, 10, fill=1, stroke=0)
+    c.setFillAlpha(1.0)
+
     def field(y, label, value):
         c.setFillColor(HexColor("#42d7e9"))
-        c.setFont("Helvetica", 7)
-        c.drawString(12 * mm, y, label.upper())
-        c.setFillColor(HexColor("#ffffff"))
-        c.setFont("Helvetica-Bold", 10.5)
-        c.drawString(12 * mm, y - 4.5 * mm, str(value)[:35])
-        return y - 11.5 * mm
+        c.setFont("Helvetica", 7.5)
+        c.drawString(16*mm, y, label.upper())
+        c.setFillColor(HexColor("#FFFFFF"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(16*mm, y-5*mm, str(value)[:40])
+        return y - 12*mm
 
-    y = card_y - 2*mm
+    y = details_y - 6*mm
     y = field(y, "Guest Name", ticket["name"])
     y = field(y, "Ticket Code", ticket["ticket_code"])
     y = field(y, "WhatsApp", ticket["whatsapp"])
+
+    c.setDash(2,2)
+    c.setStrokeColor(HexColor("#D4AF37"))
+    c.line(16*mm, y+2*mm, width-16*mm, y+2*mm)
+    c.setDash()
+    y -= 6*mm
+
     y = field(y, "Seat", ticket.get("seat", "General"))
-    y = field(y, "Amount", f"NGN {ticket['amount_paid']:,}")
+    y = field(y, "Amount Paid", f"NGN {ticket['amount_paid']:,}")
 
     # 8. ADMIT LINE
-    c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(1)
-    c.setDash(2, 2)
-    c.line(10*mm, 28*mm, width-10*mm, 28*mm)
-    c.setDash()
-    c.setFont("Helvetica-Bold", 8)
     c.setFillColor(HexColor("#D4AF37"))
-    c.drawCentredString(width/2, 21*mm, "ADMIT ONE • PRESENT QR AT GATE")
+    c.setFont("Helvetica-Bold", 8)
+    c.drawCentredString(width/2, 22*mm, "ADMIT ONE • PRESENT QR AT GATE")
 
     # 9. FOOTER
     c.setFillColor(HexColor("#a8c1c8"))
     c.setFont("Helvetica", 6.5)
-    c.drawCentredString(width / 2, 15 * mm, f"Issued: {ticket['created_at']} | Seller: {ticket.get('username','')}")
+    c.drawCentredString(width/2, 16*mm, f"Issued: {ticket['created_at']} | Seller: {ticket.get('username','')}")
 
+    # CANCELLED WATERMARK
     if ticket.get("cancelled"):
         c.saveState()
         c.setFillColor(HexColor("#ed5b63"))
         c.setFont("Helvetica-Bold", 36)
-        c.translate(width / 2, height / 2)
+        c.translate(width/2, height/2)
         c.rotate(20)
         c.drawCentredString(0, 0, "CANCELLED")
         c.restoreState()
