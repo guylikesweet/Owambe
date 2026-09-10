@@ -31,6 +31,25 @@ DEFAULT_TICKET_PRICE = 3500
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 TICKET_ALPHABET = string.ascii_uppercase + string.digits
 
+# Ticket categories: label -> number of guest seats it covers
+CATEGORY_SEATS = {
+    "Regular": 1,
+    "Table of 4": 4,
+    "Table of 5": 5,
+    "Table of 6": 6,
+    "Table of 7": 7,
+    "Table of 8": 8,
+}
+# label -> app_settings key slug used for per-category pricing
+CATEGORY_SLUGS = {
+    "Regular": "regular",
+    "Table of 4": "table4",
+    "Table of 5": "table5",
+    "Table of 6": "table6",
+    "Table of 7": "table7",
+    "Table of 8": "table8",
+}
+
 def csrf_token():
     token = session.get("csrf_token")
     if not token:
@@ -54,6 +73,15 @@ def unique_ticket_code():
     while query("SELECT 1 FROM tickets WHERE ticket_code = %s", (code,)).fetchone():
         code = generate_ticket_code()
     return code
+
+def generate_table_id():
+    return "TBL-" + "".join(secrets.choice(TICKET_ALPHABET) for _ in range(10))
+
+def unique_table_id():
+    tid = generate_table_id()
+    while query("SELECT 1 FROM tickets WHERE table_id = %s", (tid,)).fetchone():
+        tid = generate_table_id()
+    return tid
 
 def lagos_now():
     return datetime.now(LAGOS_TZ)
@@ -87,7 +115,7 @@ def query(sql, params=()):
 def init_db():
     db = get_db()
     query("""CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'seller', active BOOLEAN NOT NULL DEFAULT TRUE)""")
-    query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, seat TEXT DEFAULT 'General', used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, seat TEXT DEFAULT 'General', category TEXT NOT NULL DEFAULT 'Regular', table_id TEXT, used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
     query("""CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
     query("""CREATE TABLE IF NOT EXISTS ticket_audit (id SERIAL PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets (id), action TEXT NOT NULL, performed_by INTEGER REFERENCES users (id), detail TEXT, created_at TEXT)""")
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
@@ -105,6 +133,9 @@ def init_db():
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS refunded_by INTEGER REFERENCES users(id)")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_sent_at TEXT")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS send_count INTEGER NOT NULL DEFAULT 0")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Regular'")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS table_id TEXT")
+    query("CREATE INDEX IF NOT EXISTS idx_tickets_table_id ON tickets(table_id)")
     missing = query("SELECT id FROM tickets WHERE ticket_code IS NULL OR ticket_code = ''").fetchall()
     for row in missing:
         code = generate_ticket_code()
@@ -113,6 +144,8 @@ def init_db():
         query("UPDATE tickets SET ticket_code = %s WHERE id = %s", (code, row["id"]))
     query("UPDATE tickets SET qr_data = ticket_code WHERE qr_data IS NULL OR qr_data = ''")
     query("INSERT INTO app_settings (key, value) VALUES ('ticket_price', %s) ON CONFLICT (key) DO NOTHING", (str(DEFAULT_TICKET_PRICE),))
+    for slug in CATEGORY_SLUGS.values():
+        query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (f"price_{slug}", str(DEFAULT_TICKET_PRICE)))
     db.commit()
     user = query("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
     if not user:
@@ -120,12 +153,20 @@ def init_db():
         db.commit()
         print("Default admin created: admin / admin123")
 
+def get_ticket_prices():
+    rows = query("SELECT key, value FROM app_settings WHERE key LIKE 'price_%'").fetchall()
+    existing = {r["key"]: r["value"] for r in rows}
+    prices = {}
+    for label, slug in CATEGORY_SLUGS.items():
+        try:
+            prices[label] = int(existing.get(f"price_{slug}", DEFAULT_TICKET_PRICE))
+        except (TypeError, ValueError):
+            prices[label] = DEFAULT_TICKET_PRICE
+    return prices
+
 def get_ticket_price():
-    row = query("SELECT value FROM app_settings WHERE key = 'ticket_price'").fetchone()
-    try:
-        return int(row["value"]) if row else DEFAULT_TICKET_PRICE
-    except (TypeError, ValueError):
-        return DEFAULT_TICKET_PRICE
+    # Kept for backward compatibility (home.html etc.) — returns the Regular price.
+    return get_ticket_prices().get("Regular", DEFAULT_TICKET_PRICE)
 
 def log_audit(ticket_id, action, performed_by, detail=""):
     query("INSERT INTO ticket_audit (ticket_id, action, performed_by, detail, created_at) VALUES (%s,%s,%s,%s,%s)", (ticket_id, action, performed_by, detail, lagos_timestamp()))
@@ -221,11 +262,17 @@ def build_ticket_pdf(ticket):
         c.drawString(14 * mm, y - 4.2 * mm, str(value)[:38])
         return y - 10.2 * mm
 
+    category = ticket.get("category") or "Regular"
+    if ticket.get("table_id"):
+        ticket_type_display = f"{category} \u2022 {ticket.get('seat', '')}"
+    else:
+        ticket_type_display = category
+
     y = details_top - 5.5 * mm
     y = field(y, "GUEST NAME", ticket["name"])
     y = field(y, "TICKET CODE", ticket["ticket_code"])
     y = field(y, "WHATSAPP", ticket["whatsapp"])
-    y = field(y, "SEAT", ticket.get("seat", "General"))
+    y = field(y, "TICKET TYPE", ticket_type_display)
     y = field(y, "AMOUNT PAID", f"NGN {ticket['amount_paid']:,}")
 
     # 7. FOOTER - positioned just below the details box
@@ -424,17 +471,26 @@ def restore_seller(user_id):
 @app.route("/admin/price", methods=["POST"])
 @login_required(role="admin")
 def update_price():
-    raw = request.form.get("ticket_price", "").replace(",", "").strip()
-    try:
-        price = int(raw)
-        if price < 0:
-            raise ValueError
-    except ValueError:
-        flash("Ticket price must be a valid non-negative amount.", "error")
+    updates = {}
+    for label, slug in CATEGORY_SLUGS.items():
+        raw = request.form.get(f"price_{slug}", "").replace(",", "").strip()
+        if raw == "":
+            continue
+        try:
+            price = int(raw)
+            if price < 0:
+                raise ValueError
+        except ValueError:
+            flash(f"Price for {label} must be a valid non-negative amount.", "error")
+            return redirect(url_for("report"))
+        updates[slug] = price
+    if not updates:
+        flash("No prices were submitted.", "error")
         return redirect(url_for("report"))
-    query("INSERT INTO app_settings (key, value) VALUES ('ticket_price', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (str(price),))
+    for slug, price in updates.items():
+        query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (f"price_{slug}", str(price)))
     get_db().commit()
-    flash("Ticket price updated. New sales will use the new price.", "success")
+    flash("Ticket prices updated. New sales will use the new prices.", "success")
     return redirect(url_for("report"))
 
 @app.route("/admin/reset_tickets", methods=["POST"])
@@ -452,11 +508,11 @@ def reset_tickets():
 @app.route("/report")
 @login_required(role="admin")
 def report():
-    price = get_ticket_price()
+    prices = get_ticket_prices()
     sales = query("""SELECT u.id, u.username, u.role, u.active, COUNT(t.id) AS tickets_sold, COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash, COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used FROM users u LEFT JOIN tickets t ON u.id = t.sold_by GROUP BY u.id ORDER BY u.role, u.active DESC, u.username""").fetchall()
     users = query("SELECT id, username, role, active FROM users ORDER BY role, active DESC, username").fetchall()
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
-    return render_template("report.html", sales=sales, users=users, overall=overall, ticket_price=price, event_name=EVENT_NAME, user=g.user)
+    return render_template("report.html", sales=sales, users=users, overall=overall, prices=prices, categories=CATEGORY_SLUGS, event_name=EVENT_NAME, user=g.user)
 
 @app.route("/")
 @login_required()
@@ -470,22 +526,63 @@ def home():
 @login_required()
 def sell():
     user = g.user
-    price = get_ticket_price()
+    prices = get_ticket_prices()
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        whatsapp = request.form.get("whatsapp", "").strip()
-        if not name or not whatsapp:
-            flash("Guest name and WhatsApp number are required.", "error")
+        category = request.form.get("category", "Regular").strip()
+        if category not in CATEGORY_SEATS:
+            flash("Please select a valid ticket category.", "error")
             return redirect(url_for("sell"))
+        seats = CATEGORY_SEATS[category]
+        price = prices.get(category, DEFAULT_TICKET_PRICE)
         created = lagos_timestamp()
-        ticket_code = unique_ticket_code()
-        row = query("INSERT INTO tickets (ticket_code, name, whatsapp, seat, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id", (ticket_code, name, whatsapp, "General", created, user["id"], price, ticket_code)).fetchone()
-        get_db().commit()
-        return redirect(url_for("ticket_issued", ticket_id=row["id"]))
+        db = get_db()
+
+        if seats == 1:
+            name = request.form.get("name", "").strip()
+            whatsapp = request.form.get("whatsapp", "").strip()
+            if not name or not whatsapp:
+                flash("Guest name and WhatsApp number are required.", "error")
+                return redirect(url_for("sell"))
+            ticket_code = unique_ticket_code()
+            row = query(
+                "INSERT INTO tickets (ticket_code, name, whatsapp, seat, category, table_id, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (ticket_code, name, whatsapp, "General", category, None, created, user["id"], price, ticket_code),
+            ).fetchone()
+            db.commit()
+            return redirect(url_for("ticket_issued", ticket_id=row["id"]))
+
+        # Table variation: one form submission, N guests, N independent tickets sharing one table_id
+        guests = []
+        for i in range(1, seats + 1):
+            g_name = request.form.get(f"guest_name_{i}", "").strip()
+            g_whatsapp = request.form.get(f"guest_whatsapp_{i}", "").strip()
+            if not g_name or not g_whatsapp:
+                flash(f"Please provide the name and WhatsApp number for guest {i} of {seats}.", "error")
+                return redirect(url_for("sell"))
+            guests.append((g_name, g_whatsapp))
+
+        table_id = unique_table_id()
+        first_id = None
+        for i, (g_name, g_whatsapp) in enumerate(guests, start=1):
+            ticket_code = unique_ticket_code()
+            row = query(
+                "INSERT INTO tickets (ticket_code, name, whatsapp, seat, category, table_id, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (ticket_code, g_name, g_whatsapp, f"Guest {i} of {seats}", category, table_id, created, user["id"], price, ticket_code),
+            ).fetchone()
+            if first_id is None:
+                first_id = row["id"]
+        db.commit()
+        return redirect(url_for("ticket_issued", ticket_id=first_id))
+
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
     mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE sold_by = %s""", (user["id"],)).fetchone()
     recent = query("""SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC LIMIT 2""").fetchall()
-    return render_template("sell.html", overall=overall, mine=mine, recent=recent, price=price, event_name=EVENT_NAME, user=user)
+    return render_template(
+        "sell.html",
+        overall=overall, mine=mine, recent=recent,
+        prices=prices, categories=CATEGORY_SEATS,
+        event_name=EVENT_NAME, user=user,
+    )
 
 @app.route("/tickets")
 @login_required()
@@ -567,7 +664,14 @@ def qr_image(ticket_code):
 @login_required()
 def ticket_issued(ticket_id):
     ticket = get_ticket_or_404(ticket_id)
-    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, user=g.user)
+    if ticket["table_id"]:
+        tickets = query(
+            "SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.table_id = %s ORDER BY t.id",
+            (ticket["table_id"],),
+        ).fetchall()
+    else:
+        tickets = [ticket]
+    return render_template("ticket_issued.html", ticket=ticket, tickets=tickets, event_name=EVENT_NAME, user=g.user)
 
 @app.route("/ticket/<int:ticket_id>")
 @login_required()
@@ -646,9 +750,9 @@ def export_csv():
     tickets = query("SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC").fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Seat", "Sold By", "Amount Paid", "Created At", "Used", "Used At", "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
+    cw.writerow(["Ticket Code", "Name", "WhatsApp", "Seat", "Category", "Table ID", "Sold By", "Amount Paid", "Created At", "Used", "Used At", "Cancelled", "Cancel Reason", "Refunded", "Refund Amount"])
     for t in tickets:
-        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t.get("seat","General"), t["username"], t["amount_paid"], t["created_at"], t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
+        cw.writerow([t["ticket_code"], t["name"], t["whatsapp"], t.get("seat","General"), t.get("category","Regular"), t.get("table_id") or "", t["username"], t["amount_paid"], t["created_at"], t["used"], t["used_at"], t["cancelled"], t["cancel_reason"] or "", t["refunded"], t["refund_amount"] or ""])
     return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=owambe_tickets.csv"})
 
 if __name__ == "__main__":
