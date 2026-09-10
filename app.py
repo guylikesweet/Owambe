@@ -192,7 +192,7 @@ def build_ticket_pdf(ticket):
     line = ""
     for word in words:
         if len(line + " " + word) < 40:
-            line += " + word if line else word
+            line += " " + word if line else word
         else:
             lines.append(line)
             line = word
