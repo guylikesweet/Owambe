@@ -44,6 +44,37 @@
   </div>
 </section>
 
+<style>
+  /* Scoped fix: keep the confirm-ticket modal scrollable so the action
+     buttons never fall outside the visible viewport on tall guest lists. */
+  #confirm-modal.modal-backdrop {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 24px 12px;
+  }
+  #confirm-modal .modal-card {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 48px);
+    width: 100%;
+    overflow: hidden; /* the inner grid scrolls, the card itself doesn't */
+  }
+  #confirm-modal #review-grid {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  #confirm-modal .modal-actions {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    background: inherit;
+    padding-top: 12px;
+  }
+</style>
+
 <div id="confirm-modal" class="modal-backdrop" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <span class="eyebrow">CROSS-CHECK BEFORE ISSUING</span>
