@@ -230,9 +230,9 @@ def build_ticket_pdf(ticket):
         c.setFillColor(HexColor("#ffffff"))
         c.setFont("Helvetica-Bold", 10.5)
         c.drawString(12 * mm, y - 4.5 * mm, str(value)[:35])
-        return y - 11.5 * mm # Reduced from 13mm
+        return y - 11.5 * mm
 
-    y = card_y - 2*mm # Start slightly higher
+    y = card_y - 2*mm
     y = field(y, "Guest Name", ticket["name"])
     y = field(y, "Ticket Code", ticket["ticket_code"])
     y = field(y, "WhatsApp", ticket["whatsapp"])
@@ -557,8 +557,8 @@ def qr_image(ticket_code):
 @app.route("/ticket_issued/<int:ticket_id>")
 @login_required()
 def ticket_issued(ticket_id):
-    # FIX: Redirect to main ticket page so buttons work immediately
-    return redirect(url_for("ticket", ticket_id=ticket_id))
+    ticket = get_ticket_or_404(ticket_id)
+    return render_template("ticket_issued.html", ticket=ticket, event_name=EVENT_NAME, user=g.user)
 
 @app.route("/ticket/<int:ticket_id>")
 @login_required()
