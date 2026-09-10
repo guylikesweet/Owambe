@@ -47,7 +47,10 @@
 <style>
   /* Scoped fix: keep the confirm-ticket modal scrollable so the action
      buttons never fall outside the visible viewport on tall guest lists. */
-  #confirm-modal.modal-backdrop {
+  #confirm-modal.modal-backdrop[hidden] {
+    display: none;
+  }
+  #confirm-modal.modal-backdrop:not([hidden]) {
     display: flex;
     align-items: center;
     justify-content: center;
