@@ -11,9 +11,8 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.lib.units import mm
-from reportlab.lib.colors import HexColor, Color
+from reportlab.lib.colors import HexColor
 from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase.pdfmetrics import stringWidth
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY")
@@ -154,24 +153,24 @@ def build_ticket_pdf(ticket):
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
 
-    # 1. FULL FLIER BACKGROUND
+    # 1. FULL FLIER BACKGROUND - using flyer spelling
     try:
-        bg_path = "static/img/owambe-flier.jpg"
+        bg_path = "static/img/owambe-flyer.jpg"
         bg_img = ImageReader(bg_path)
         c.setFillColor(HexColor("#000"))
         c.rect(0, 0, width, height, fill=1, stroke=0)
-        c.setFillColorAlpha(1, 0.20)
+        c.setFillAlpha(0.20)
         c.drawImage(bg_img, 0, 0, width=width, height=height, mask='auto')
-        c.setFillColorAlpha(1, 1)
+        c.setFillAlpha(1.0)
     except:
         c.setFillColor(HexColor("#0b1f2b"))
         c.rect(0, 0, width, height, fill=1, stroke=0)
 
     # 2. DARK OVERLAY
     c.setFillColor(HexColor("#0b1f2b"))
-    c.setFillColorAlpha(1, 0.80)
+    c.setFillAlpha(0.80)
     c.rect(0, 0, width, height, fill=1, stroke=0)
-    c.setFillColorAlpha(1, 1)
+    c.setFillAlpha(1.0)
 
     # 3. LOGO
     try:
@@ -193,7 +192,7 @@ def build_ticket_pdf(ticket):
     line = ""
     for word in words:
         if len(line + " " + word) < 40:
-            line += " " + word if line else word
+            line += " + word if line else word
         else:
             lines.append(line)
             line = word
@@ -206,9 +205,9 @@ def build_ticket_pdf(ticket):
     # 5. TICKET CARD
     card_y = height - 115 * mm
     c.setFillColor(HexColor("#1a2f3a"))
-    c.setFillColorAlpha(1, 0.88)
+    c.setFillAlpha(0.88)
     c.roundRect(8*mm, card_y, width-16*mm, 72*mm, 10, fill=1, stroke=0)
-    c.setFillColorAlpha(1, 1)
+    c.setFillAlpha(1.0)
     c.setStrokeColor(HexColor("#D4AF37"))
     c.setLineWidth(1.8)
     c.roundRect(8*mm, card_y, width-16*mm, 72*mm, 10, fill=0, stroke=1)
@@ -563,14 +562,11 @@ def ticket_issued(ticket_id):
 @login_required()
 def ticket(ticket_id):
     ticket = get_ticket_or_404(ticket_id)
-
-    # Generate QR as base64 for HTML
     qr_data = f"{request.url_root}t/{ticket['ticket_code']}/pdf"
     qr = qrcode.make(qr_data)
     buf = io.BytesIO()
     qr.save(buf, format="PNG")
     qr_base64 = base64.b64encode(buf.getvalue()).decode()
-
     return render_template("ticket.html", ticket=ticket, qr_base64=qr_base64, event_name=EVENT_NAME, user=g.user)
 
 def normalize_phone(raw):
