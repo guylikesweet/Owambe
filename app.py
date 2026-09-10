@@ -151,33 +151,58 @@ def build_ticket_pdf(ticket):
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=(width, height))
 
-    # 1. BACKGROUND
+    # 1. BACKGROUND — unchanged
     try:
         bg_img = ImageReader("static/img/owambe-flyer.jpg")
-        c.drawImage(bg_img, 0, 0, width=width, height=height, mask='auto')
+        c.drawImage(bg_img, 0, 0, width=width, height=height, mask="auto")
     except:
         c.setFillColor(HexColor("#0b1f2b"))
-        c.rect(0, 0, width, height, fill=1)
+        c.rect(0, 0, width, height, fill=1, stroke=0)
 
-    # 2. DARK OVERLAY
+    # 2. DARK OVERLAY — unchanged
     c.setFillColor(HexColor("#0b1f2b"))
     c.setFillAlpha(0.88)
-    c.rect(0, 0, width, height, fill=1)
+    c.rect(0, 0, width, height, fill=1, stroke=0)
     c.setFillAlpha(1.0)
 
-    # 3. LOGO AT TOP
-    logo_y = height - 24*mm
+    # 3. LOGO — positioned at the top, outside the gold border
+    logo_w = 48 * mm
+    logo_h = 16 * mm
+    logo_x = (width - logo_w) / 2
+    logo_y = height - logo_h - 5 * mm
+
     try:
         logo_img = ImageReader("static/img/owambe-logo.png")
-        c.drawImage(logo_img, (width-50*mm)/2, logo_y, width=50*mm, height=14*mm, mask='auto')
-    except: pass
+        c.drawImage(
+            logo_img,
+            logo_x,
+            logo_y,
+            width=logo_w,
+            height=logo_h,
+            mask="auto"
+        )
+    except:
+        pass
 
-    # 4. GOLD BORDER CARD - starts below logo
-    card_y = logo_y - 20*mm
-    card_h = height - card_y - 10*mm
+    # 4. GOLD BORDER
+    # The border starts below the logo and contains only
+    # the QR code, ticket details, and footer.
+    card_x = 6 * mm
+    card_y = 7 * mm
+    card_w = width - 12 * mm
+    card_h = logo_y - card_y - 5 * mm
+
     c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(2.5)
-    c.roundRect(6*mm, card_y, width-12*mm, card_h, 14, stroke=1)
+    c.setLineWidth(2.2)
+    c.roundRect(
+        card_x,
+        card_y,
+        card_w,
+        card_h,
+        14,
+        fill=0,
+        stroke=1
+    )
 
     # 5. QR CODE
     qr_data = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
@@ -185,66 +210,145 @@ def build_ticket_pdf(ticket):
     qr_buf = io.BytesIO()
     qr_img.save(qr_buf, format="PNG")
     qr_buf.seek(0)
-    qr_size = 50 * mm
-    qr_y = card_y + card_h - 60*mm
+
+    qr_size = 43 * mm
+    qr_y = card_y + card_h - qr_size - 7 * mm
+
+    # White QR background
+    qr_box_x = (width - qr_size) / 2 - 3 * mm
+    qr_box_y = qr_y - 3 * mm
+    qr_box_w = qr_size + 6 * mm
+    qr_box_h = qr_size + 6 * mm
+
     c.setFillColor(HexColor("#ffffff"))
-    c.roundRect((width-qr_size)/2-3*mm, qr_y, qr_size+6*mm, qr_size+6*mm, 10, fill=1)
+    c.roundRect(
+        qr_box_x,
+        qr_box_y,
+        qr_box_w,
+        qr_box_h,
+        9,
+        fill=1,
+        stroke=0
+    )
+
+    # Gold QR border
     c.setStrokeColor(HexColor("#D4AF37"))
-    c.setLineWidth(2)
-    c.roundRect((width-qr_size)/2-3*mm, qr_y, qr_size+6*mm, qr_size+6*mm, 10, stroke=1)
-    c.drawImage(ImageReader(qr_buf), (width-qr_size)/2, qr_y+3*mm, width=qr_size, height=qr_size, mask="auto")
+    c.setLineWidth(1.6)
+    c.roundRect(
+        qr_box_x,
+        qr_box_y,
+        qr_box_w,
+        qr_box_h,
+        9,
+        fill=0,
+        stroke=1
+    )
+
+    c.drawImage(
+        ImageReader(qr_buf),
+        (width - qr_size) / 2,
+        qr_y,
+        width=qr_size,
+        height=qr_size,
+        mask="auto"
+    )
 
     # 6. DETAILS BOX
-    details_top = qr_y - 8*mm
-    c.setFillColor(HexColor("#000"))
+    details_top = qr_y - 6 * mm
+    details_height = 52 * mm
+
+    c.setFillColor(HexColor("#000000"))
     c.setFillAlpha(0.35)
-    c.roundRect(10*mm, details_top-58*mm, width-20*mm, 58*mm, 8, fill=1)
+    c.roundRect(
+        10 * mm,
+        details_top - details_height,
+        width - 20 * mm,
+        details_height,
+        8,
+        fill=1,
+        stroke=0
+    )
     c.setFillAlpha(1.0)
 
     def field(y, label, value):
         c.setFillColor(HexColor("#42d7e9"))
-        c.setFont("Helvetica", 7)
-        c.drawString(14*mm, y, label)
-        c.setFillColor(HexColor("#FFFFFF"))
-        c.setFont("Helvetica-Bold", 10.5)
-        c.drawString(14*mm, y-4.5*mm, str(value)[:38])
-        return y - 11.5*mm
+        c.setFont("Helvetica", 6.8)
+        c.drawString(14 * mm, y, label)
 
-    y = details_top - 7*mm
+        c.setFillColor(HexColor("#FFFFFF"))
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(14 * mm, y - 4.2 * mm, str(value)[:38])
+
+        return y - 10.2 * mm
+
+    y = details_top - 5.5 * mm
     y = field(y, "GUEST NAME", ticket["name"])
     y = field(y, "TICKET CODE", ticket["ticket_code"])
     y = field(y, "WHATSAPP", ticket["whatsapp"])
     y = field(y, "SEAT", ticket.get("seat", "General"))
     y = field(y, "AMOUNT PAID", f"NGN {ticket['amount_paid']:,}")
 
-    # 7. DASHED LINE
-    footer_start_y = card_y + 18*mm
+    # 7. FOOTER — dedicated area with no overlap
+    footer_divider_y = card_y + 31 * mm
+
     c.setStrokeColor(HexColor("#D4AF37"))
     c.setLineWidth(1)
     c.setDash(3, 3)
-    c.line(10*mm, footer_start_y, width-10*mm, footer_start_y)
+    c.line(
+        10 * mm,
+        footer_divider_y,
+        width - 10 * mm,
+        footer_divider_y
+    )
     c.setDash()
 
-    # 8. FOOTER
+    # Gate instruction
+    gate_y = footer_divider_y - 5.5 * mm
+
     c.setFillColor(HexColor("#D4AF37"))
-    c.setFont("Helvetica-Bold", 8)
-    c.drawCentredString(width/2, footer_start_y - 5*mm, "PRESENT TICKET AT THE GATE")
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString(
+        width / 2,
+        gate_y,
+        "PRESENT TICKET AT THE GATE"
+    )
+
+    # Issue date/time and seller
+    issued_y = gate_y - 7 * mm
 
     c.setFillColor(HexColor("#a8c1c8"))
-    c.setFont("Helvetica", 6)
-    c.drawCentredString(width/2, footer_start_y - 10*mm, f"Issued: {ticket['created_at']} | Seller: {ticket.get('username','')}")
+    c.setFont("Helvetica", 5.8)
+    c.drawCentredString(
+        width / 2,
+        issued_y,
+        f"Issued: {ticket['created_at']} | Seller: {ticket.get('username', '')}"
+    )
 
-    # WARNING LINE
+    # Security warning
+    warning_y = issued_y - 6 * mm
+
     c.setFillColor(HexColor("#ed5b63"))
-    c.setFont("Helvetica-Bold", 6)
-    c.drawCentredString(width/2, footer_start_y - 15*mm, "DO NOT SHARE THIS TICKET. IT CAN BE STOLEN.")
+    c.setFont("Helvetica-Bold", 5.7)
+    c.drawCentredString(
+        width / 2,
+        warning_y,
+        "WARNING: DO NOT SHARE YOUR TICKET DETAILS."
+    )
 
-    # CANCELLED WATERMARK
+    c.setFillColor(HexColor("#a8c1c8"))
+    c.setFont("Helvetica", 5.1)
+    c.drawCentredString(
+        width / 2,
+        warning_y - 3.5 * mm,
+        "Sharing your ticket details may allow someone else to steal or use your ticket."
+    )
+
+    # 8. CANCELLED WATERMARK
     if ticket.get("cancelled"):
         c.saveState()
         c.setFillColor(HexColor("#ed5b63"))
         c.setFont("Helvetica-Bold", 32)
-        c.translate(width/2, height/2)
+        c.translate(width / 2, height / 2)
         c.rotate(20)
         c.drawCentredString(0, 0, "CANCELLED")
         c.restoreState()
