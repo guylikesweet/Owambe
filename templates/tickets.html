@@ -52,9 +52,9 @@
         </td>
         <td data-label="Actions">
           <div class="ticket-actions">
-            <a href="{{ url_for('ticket_pdf', ticket_id=t.id) }}" class="small-btn">Download PDF</a>
+            <a href="{{ url_for('ticket_pdf', ticket_id=t.id) }}" class="small-btn">Download Ticket</a>
             
-            <a href="{{ url_for('send_ticket_whatsapp', ticket_id=t.id) }}" class="small-btn">Send WA</a>
+            <a href="{{ url_for('send_ticket_whatsapp', ticket_id=t.id) }}" class="small-btn">Send via WA</a>
 
             {% if not t.cancelled and not t.used %}
             <form method="POST" action="{{ url_for('cancel_ticket', ticket_id=t.id) }}" style="display:inline" onsubmit="return confirm('Cancel this ticket?')">
