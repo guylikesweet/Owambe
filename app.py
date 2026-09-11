@@ -621,7 +621,15 @@ def send_ticket_whatsapp(ticket_id):
     log_audit(ticket_id, "whatsapp_sent", g.user["id"], f"To {ticket['whatsapp']}")
     db.commit()
     link = f"{request.host_url}t/{ticket['ticket_code']}/pdf"
-    message = f"Hi {ticket['name']}! 🎉\n\nYour ticket for \"{EVENT_NAME}\" is ready.\nTicket code: {ticket['ticket_code']}\nDownload your ticket & QR here: {link}\n\nPlease present the QR code at the gate. See you there!"
+    message = (
+    f"Hi {ticket['name']}! 🎉\n\n"
+    f"Your ticket for \"{EVENT_NAME}\" is ready.\n"
+    f"Category: {ticket['category']}\n"
+    f"Ticket code: {ticket['ticket_code']}\n"
+    f"Download your ticket & QR here: {link}\n\n"
+    f"⚠️ This link is yours alone — don't share it. Shared links get stolen and used by someone else at the gate.\n\n"
+    f"Please present the QR code at the gate. See you there!"
+    )
     dial = whatsapp_dial_number(ticket["whatsapp"])
     wa_url = f"https://wa.me/{dial}?text={urllib.parse.quote(message)}"
     return redirect(wa_url)
