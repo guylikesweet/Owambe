@@ -24,7 +24,10 @@
     <span id="scan-status-title" class="status-title"></span>
     <p id="scan-status-message" class="status-message"></p>
     <div id="scan-guest" class="scan-guest"></div>
-    <button id="scan-handle" class="btn" type="button">OKAY</button>
+    <div class="scan-actions" style="display:flex; gap:10px; margin-top:10px;">
+      <button id="scan-confirm" class="btn" type="button" hidden>Confirm Check-in</button>
+      <button id="scan-handle" class="btn" type="button">OKAY</button>
+    </div>
   </div>
 </div>
 
@@ -37,9 +40,11 @@ const titleBox = document.getElementById('scan-status-title');
 const messageBox = document.getElementById('scan-status-message');
 const guestBox = document.getElementById('scan-guest');
 const handleButton = document.getElementById('scan-handle');
+const confirmButton = document.getElementById('scan-confirm');
 const switchBtn = document.getElementById('switch-cam-btn');
 let canScan = true;
 let activeResult = null;
+let pendingTicketCode = null; // ticket code awaiting explicit "Confirm Check-in"
 let html5QrCode = null;
 let cameras = [];
 let currentCameraId = null;
@@ -56,6 +61,11 @@ function playTone(kind) {
     osc.frequency.setValueAtTime(880, now); osc.frequency.setValueAtTime(1175, now + 0.09);
     gain.gain.setValueAtTime(0.001, now); gain.gain.exponentialRampToValueAtTime(0.18, now + 0.01); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
     osc.connect(gain); gain.connect(ctx.destination); osc.start(now); osc.stop(now + 0.23);
+  } else if (kind === 'pending') {
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.frequency.setValueAtTime(660, now);
+    gain.gain.setValueAtTime(0.001, now); gain.gain.exponentialRampToValueAtTime(0.12, now + 0.01); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(gain); gain.connect(ctx.destination); osc.start(now); osc.stop(now + 0.16);
   } else {
     const osc = ctx.createOscillator(); const gain = ctx.createGain();
     osc.type = 'sawtooth'; osc.frequency.setValueAtTime(210, now); osc.frequency.setValueAtTime(130, now + 0.18);
@@ -64,13 +74,25 @@ function playTone(kind) {
   }
 }
 
+function guestDetailRows(data) {
+  const rows = [`<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div>`];
+  if (data.whatsapp) rows.push(`<div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div>`);
+  if (data.ticket_code) rows.push(`<div><span>Ticket</span><strong>${escapeHtml(data.ticket_code)}</strong></div>`);
+  if (data.category) rows.push(`<div><span>Category</span><strong>${escapeHtml(data.category)}</strong></div>`);
+  if (data.table_id) rows.push(`<div><span>Table</span><strong>${escapeHtml(data.table_id)} · ${escapeHtml(data.seat || '')}</strong></div>`);
+  return rows.join('');
+}
+
 function showResult(data) {
   activeResult = data;
-  const isValid = data.status === 'VALID';
+  const isFound = data.status === 'FOUND';
+  const isCheckedIn = data.status === 'CHECKED_IN';
   const isMultiple = data.status === 'MULTIPLE';
-  iconBox.textContent = isValid? '✓' : (isMultiple? '!' : '×');
-  titleBox.textContent = data.status;
-  titleBox.className = 'status-title ' + (isValid? 'valid' : 'invalid');
+  const isGoodNews = isCheckedIn; // only a completed check-in plays the success tone / green styling
+
+  iconBox.textContent = isCheckedIn ? '✓' : (isFound ? '?' : (isMultiple ? '!' : '×'));
+  titleBox.textContent = isFound ? 'TICKET FOUND — NOT YET CHECKED IN' : data.status;
+  titleBox.className = 'status-title ' + (isGoodNews ? 'valid' : (isFound ? '' : 'invalid'));
   messageBox.textContent = data.msg || '';
 
   if (isMultiple && Array.isArray(data.matches)) {
@@ -81,32 +103,46 @@ function showResult(data) {
     `).join('');
     guestBox.style.gridTemplateColumns = '1fr';
     guestBox.querySelectorAll('.match-pick').forEach(btn => {
-      btn.addEventListener('click', () => checkTicket(btn.dataset.code));
+      btn.addEventListener('click', () => lookupTicket(btn.dataset.code));
     });
   } else {
     guestBox.style.gridTemplateColumns = '';
-    guestBox.innerHTML = data.name? `<div><span>Guest</span><strong>${escapeHtml(data.name)}</strong></div><div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div><div><span>Ticket</span><strong>${escapeHtml(data.ticket_code || '')}</strong></div>` : '';
+    guestBox.innerHTML = data.name ? guestDetailRows(data) : '';
   }
 
-  handleButton.textContent = isValid? 'OKAY' : (isMultiple? 'CANCEL' : 'HANDLED IT');
-  handleButton.className = 'btn ' + (isValid? '' : 'danger-button');
-  if (isValid) playTone('valid'); else if (!isMultiple) playTone('invalid');
+  // Confirm Check-in only appears once a specific, not-yet-used ticket has been looked up.
+  if (isFound) {
+    pendingTicketCode = data.ticket_code;
+    confirmButton.hidden = false;
+    handleButton.textContent = 'CANCEL';
+    handleButton.className = 'btn secondary';
+  } else {
+    pendingTicketCode = null;
+    confirmButton.hidden = true;
+    handleButton.textContent = isCheckedIn ? 'OKAY' : (isMultiple ? 'CANCEL' : 'HANDLED IT');
+    handleButton.className = 'btn ' + (isGoodNews ? '' : 'danger-button');
+  }
+
+  if (isCheckedIn) playTone('valid');
+  else if (isFound) playTone('pending');
+  else if (!isMultiple) playTone('invalid');
+
   overlay.hidden = false;
   document.body.classList.add('modal-open');
-  // FIX: canScan must be explicitly re-enabled for MULTIPLE results, or the
-  // guard clause at the top of checkTicket() silently blocks match selection
-  // (checkTicket() sets canScan = false as soon as it starts, and previously
-  // nothing ever set it back to true for the multiple-match case).
+  // Scanning stays locked for everything except MULTIPLE (picking a guest) —
+  // including FOUND, so the camera cannot fire again until the handler either
+  // confirms or cancels the pending check-in.
   canScan = isMultiple;
 }
 
-async function checkTicket(value) {
-  if (!value ||!canScan) return;
+// Step 1: look up a ticket by code or WhatsApp number. Does NOT mark it used.
+async function lookupTicket(value) {
+  if (!value || !canScan) return;
   canScan = false;
   value = value.trim();
   const formData = new FormData(); formData.append('data', value); formData.append('csrf_token', '{{ csrf_token() }}');
   try {
-    const res = await fetch("{{ url_for('check_ticket') }}", {method:'POST', body:formData});
+    const res = await fetch("{{ url_for('api_lookup_ticket') }}", {method:'POST', body:formData});
     const data = await res.json();
     showResult(data);
   } catch (err) {
@@ -115,10 +151,30 @@ async function checkTicket(value) {
   input.value = '';
 }
 
+// Step 2: handler explicitly confirms — only now does the ticket get marked used.
+async function confirmCheckin(ticketCode) {
+  if (!ticketCode) return;
+  const formData = new FormData(); formData.append('ticket_code', ticketCode); formData.append('csrf_token', '{{ csrf_token() }}');
+  try {
+    const res = await fetch("{{ url_for('api_confirm_checkin') }}", {method:'POST', body:formData});
+    const data = await res.json();
+    showResult(data);
+  } catch (err) {
+    showResult({status:'ERROR', msg:'Could not reach the server.'});
+  }
+}
+
+confirmButton.addEventListener('click', () => {
+  confirmButton.hidden = true;
+  confirmCheckin(pendingTicketCode);
+});
+
 handleButton.addEventListener('click', async () => {
   overlay.hidden = true;
   document.body.classList.remove('modal-open');
   activeResult = null;
+  pendingTicketCode = null;
+  confirmButton.hidden = true;
   input.value = '';
   input.focus();
 
@@ -128,7 +184,7 @@ handleButton.addEventListener('click', async () => {
   }
 });
 
-input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkTicket(input.value); } });
+input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); lookupTicket(input.value); } });
 
 // FIX 1: Extract ticket code from URL if QR contains full link
 function extractTicketCode(decodedText) {
@@ -149,7 +205,7 @@ function onScanSuccess(decodedText) {
   if (!canScan) return; 
   html5QrCode.stop(); // STOP CAMERA IMMEDIATELY
   const code = extractTicketCode(decodedText);
-  checkTicket(code); 
+  lookupTicket(code); 
 }
 
 // FIX 2: Pick the 1x normal camera, not 0.5x wide
