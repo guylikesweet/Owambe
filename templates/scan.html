@@ -93,7 +93,11 @@ function showResult(data) {
   if (isValid) playTone('valid'); else if (!isMultiple) playTone('invalid');
   overlay.hidden = false;
   document.body.classList.add('modal-open');
-  if (!isMultiple) canScan = false;
+  // FIX: canScan must be explicitly re-enabled for MULTIPLE results, or the
+  // guard clause at the top of checkTicket() silently blocks match selection
+  // (checkTicket() sets canScan = false as soon as it starts, and previously
+  // nothing ever set it back to true for the multiple-match case).
+  canScan = isMultiple;
 }
 
 async function checkTicket(value) {
