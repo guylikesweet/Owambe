@@ -28,6 +28,7 @@ SSL_MODE = os.environ.get("DB_SSLMODE", "require")
 
 EVENT_NAME = "Bioelites Class of 26' Owambe Experience and Award Ceremony"
 DEFAULT_TICKET_PRICE = 3500
+DEFAULT_COMMISSION_RATE = 5  # percent
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 TICKET_ALPHABET = string.ascii_uppercase + string.digits
 
@@ -146,6 +147,7 @@ def init_db():
     query("INSERT INTO app_settings (key, value) VALUES ('ticket_price', %s) ON CONFLICT (key) DO NOTHING", (str(DEFAULT_TICKET_PRICE),))
     for slug in CATEGORY_SLUGS.values():
         query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (f"price_{slug}", str(DEFAULT_TICKET_PRICE)))
+    query("INSERT INTO app_settings (key, value) VALUES ('commission_rate', %s) ON CONFLICT (key) DO NOTHING", (str(DEFAULT_COMMISSION_RATE),))
     db.commit()
     user = query("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
     if not user:
@@ -170,6 +172,15 @@ def get_ticket_prices():
 def get_ticket_price():
     # Kept for backward compatibility (home.html etc.) — returns the Regular price.
     return get_ticket_prices().get("Regular", DEFAULT_TICKET_PRICE)
+
+def get_commission_rate():
+    row = query("SELECT value FROM app_settings WHERE key = 'commission_rate'").fetchone()
+    if not row:
+        return DEFAULT_COMMISSION_RATE
+    try:
+        return float(row["value"])
+    except (TypeError, ValueError):
+        return DEFAULT_COMMISSION_RATE
 
 def log_audit(ticket_id, action, performed_by, detail=""):
     query("INSERT INTO ticket_audit (ticket_id, action, performed_by, detail, created_at) VALUES (%s,%s,%s,%s,%s)", (ticket_id, action, performed_by, detail, lagos_timestamp()))
@@ -496,6 +507,22 @@ def update_price():
     flash("Ticket prices updated. New sales will use the new prices.", "success")
     return redirect(url_for("report"))
 
+@app.route("/admin/commission", methods=["POST"])
+@login_required(role="admin")
+def update_commission():
+    raw = request.form.get("commission_rate", "").strip()
+    try:
+        rate = float(raw)
+        if rate < 0 or rate > 100:
+            raise ValueError
+    except ValueError:
+        flash("Commission rate must be a number between 0 and 100.", "error")
+        return redirect(url_for("report"))
+    query("INSERT INTO app_settings (key, value) VALUES ('commission_rate', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (str(rate),))
+    get_db().commit()
+    flash("Commission rate updated.", "success")
+    return redirect(url_for("report"))
+
 @app.route("/admin/reset_tickets", methods=["POST"])
 @original_admin_required
 def reset_tickets():
@@ -512,10 +539,14 @@ def reset_tickets():
 @login_required(role="admin")
 def report():
     prices = get_ticket_prices()
-    sales = query("""SELECT u.id, u.username, u.role, u.active, COUNT(t.id) AS tickets_sold, COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash, COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used FROM users u LEFT JOIN tickets t ON u.id = t.sold_by GROUP BY u.id ORDER BY u.role, u.active DESC, u.username""").fetchall()
+    commission_rate = get_commission_rate()
+    sales = query("""SELECT u.id, u.username, u.role, u.active, COUNT(t.id) AS tickets_sold, COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash, COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used, COALESCE(SUM(t.amount_paid),0) AS total_gross FROM users u LEFT JOIN tickets t ON u.id = t.sold_by GROUP BY u.id ORDER BY u.role, u.active DESC, u.username""").fetchall()
+    # Commission = commission_rate% of each seller's total amount_paid (gross, before refunds).
+    for s in sales:
+        s["total_commission"] = round(s["total_gross"] * commission_rate / 100)
     users = query("SELECT id, username, role, active FROM users ORDER BY role, active DESC, username").fetchall()
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
-    return render_template("report.html", sales=sales, users=users, overall=overall, prices=prices, categories=CATEGORY_SLUGS, event_name=EVENT_NAME, user=g.user)
+    return render_template("report.html", sales=sales, users=users, overall=overall, prices=prices, categories=CATEGORY_SLUGS, event_name=EVENT_NAME, user=g.user, commission_rate=commission_rate)
 
 @app.route("/")
 @login_required()
@@ -699,11 +730,10 @@ def normalize_phone(raw):
     digits = re.sub(r"\D", "", raw or "")
     return digits[-10:] if len(digits) >= 10 else digits
 
-@app.route("/check_ticket", methods=["POST"])
-@login_required()
-@limiter.limit("60 per minute")
-def check_ticket():
-    raw = request.form.get("data", "").strip()
+def _find_ticket_or_matches(raw):
+    """Look up a ticket by ticket code, numeric id, or WhatsApp number.
+    Returns (ticket, matches) where exactly one of the two is set:
+    ticket is a single row, or matches is a list of 2+ rows sharing a phone number."""
     lookup = raw
     if "http://" in lookup or "https://" in lookup:
         lookup = lookup.rstrip("/").rsplit("/", 1)[-1]
@@ -716,30 +746,92 @@ def check_ticket():
         target = normalize_phone(raw)
         if len(target) >= 7:
             all_rows = query("SELECT * FROM tickets").fetchall()
-            matches = [t for t in all_rows if normalize_phone(t["whatsapp"]) == target]
-            if len(matches) == 1:
-                ticket = matches[0]
-            elif len(matches) > 1:
-                return {"status": "MULTIPLE", "msg": f"{len(matches)} tickets are registered to this number — pick the guest.", "matches": [{"id": t["id"], "ticket_code": t["ticket_code"], "name": t["name"], "used": bool(t["used"])} for t in matches]}
-    if not ticket:
-        return {"status": "INVALID", "msg": f"No ticket found for \"{raw}\""}
+            found = [t for t in all_rows if normalize_phone(t["whatsapp"]) == target]
+            if len(found) == 1:
+                ticket = found[0]
+            elif len(found) > 1:
+                return None, found
+    return ticket, None
+
+def _ticket_status_payload(ticket):
+    """Read-only status for a specific ticket — never mutates it."""
     if ticket["cancelled"]:
         reason = f" ({ticket['cancel_reason']})" if ticket["cancel_reason"] else ""
         return {"status": "CANCELLED", "msg": f"This ticket was cancelled{reason}. Entry denied.", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
     if ticket["used"]:
-        return {"status": "ALREADY USED", "msg": f"Already scanned at {ticket['used_at']} (Lagos time)", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
+        return {"status": "ALREADY_USED", "msg": f"Already scanned at {ticket['used_at']} (Lagos time)", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"], "time": ticket["used_at"]}
+    return {
+        "status": "FOUND",
+        "msg": "Ticket found. Review the details, then confirm check-in.",
+        "name": ticket["name"],
+        "whatsapp": ticket["whatsapp"],
+        "ticket_code": ticket["ticket_code"],
+        "category": ticket.get("category") or "Regular",
+        "table_id": ticket.get("table_id"),
+        "seat": ticket.get("seat"),
+        "amount_paid": ticket["amount_paid"],
+    }
+
+@app.route("/api/lookup_ticket", methods=["POST"])
+@login_required()
+@limiter.limit("60 per minute")
+def api_lookup_ticket():
+    """Step 1 of check-in: find the ticket and return its details. Never marks it used."""
+    raw = request.form.get("data", "").strip()
+    ticket, matches = _find_ticket_or_matches(raw)
+    if matches:
+        return {"status": "MULTIPLE", "msg": f"{len(matches)} tickets are registered to this number — pick the guest.", "matches": [{"id": t["id"], "ticket_code": t["ticket_code"], "name": t["name"], "used": bool(t["used"])} for t in matches]}
+    if not ticket:
+        return {"status": "INVALID", "msg": f"No ticket found for \"{raw}\""}
+    return _ticket_status_payload(ticket)
+
+@app.route("/api/confirm_checkin", methods=["POST"])
+@login_required()
+@limiter.limit("60 per minute")
+def api_confirm_checkin():
+    """Step 2 of check-in: the handler has reviewed the details and explicitly
+    confirmed. Only this route marks a ticket used."""
+    ticket_code = request.form.get("ticket_code", "").strip()
+    if not ticket_code:
+        return {"status": "INVALID", "msg": "No ticket code supplied."}
+    ticket = query("SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)).fetchone()
+    if not ticket:
+        return {"status": "INVALID", "msg": f"No ticket found for \"{ticket_code}\""}
+    if ticket["cancelled"]:
+        reason = f" ({ticket['cancel_reason']})" if ticket["cancel_reason"] else ""
+        return {"status": "CANCELLED", "msg": f"This ticket was cancelled{reason}. Entry denied.", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
+    if ticket["used"]:
+        return {"status": "ALREADY_USED", "msg": f"Already scanned at {ticket['used_at']} (Lagos time)", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"], "time": ticket["used_at"]}
     used_time = lagos_timestamp()
     updated = query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s AND used = FALSE RETURNING id", (used_time, ticket["id"])).fetchone()
     if not updated:
+        # Someone else confirmed this exact ticket in the moment between lookup and confirm.
         get_db().rollback()
-        return {"status": "ALREADY USED", "msg": "This ticket has already been used."}
+        return {"status": "ALREADY_USED", "msg": "This ticket was just checked in by someone else.", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
     get_db().commit()
-    return {"status": "VALID", "msg": "Entry Approved", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
+    log_audit(ticket["id"], "checked_in", g.user["id"], "Confirmed at door")
+    return {"status": "CHECKED_IN", "msg": "Entry approved.", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
+
+@app.route("/check_ticket", methods=["POST"])
+@login_required()
+@limiter.limit("60 per minute")
+def check_ticket():
+    """Deprecated: kept only for backward compatibility with old clients/bookmarks.
+    No longer auto-marks tickets used — mirrors /api/lookup_ticket. Use the
+    /api/lookup_ticket + /api/confirm_checkin flow for anything new."""
+    raw = request.form.get("data", "").strip()
+    ticket, matches = _find_ticket_or_matches(raw)
+    if matches:
+        return {"status": "MULTIPLE", "msg": f"{len(matches)} tickets are registered to this number — pick the guest.", "matches": [{"id": t["id"], "ticket_code": t["ticket_code"], "name": t["name"], "used": bool(t["used"])} for t in matches]}
+    if not ticket:
+        return {"status": "INVALID", "msg": f"No ticket found for \"{raw}\""}
+    return _ticket_status_payload(ticket)
 
 @app.route("/api/verify/<path:ticket_code>")
 @login_required()
 def verify(ticket_code):
-    db = get_db()
+    """Read-only status check. No longer auto-marks used — call
+    /api/confirm_checkin to actually check a guest in."""
     ticket = query("SELECT * FROM tickets WHERE UPPER(ticket_code) = UPPER(%s)", (ticket_code,)).fetchone()
     if not ticket:
         return {"status": "invalid"}
@@ -747,13 +839,7 @@ def verify(ticket_code):
         return {"status": "cancelled", "name": ticket["name"]}
     if ticket["used"]:
         return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
-    used_time = lagos_timestamp()
-    updated = query("UPDATE tickets SET used = TRUE, used_at = %s WHERE id = %s AND used = FALSE RETURNING id", (used_time, ticket["id"])).fetchone()
-    if not updated:
-        db.rollback()
-        return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
-    db.commit()
-    return {"status": "ok", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
+    return {"status": "found", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
 
 @app.route("/export")
 @login_required(role="admin")
