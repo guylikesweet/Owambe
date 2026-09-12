@@ -12,6 +12,16 @@
   <div class="stat-card"><span class="stat-value">{{ mine.sold }}</span><span class="stat-label">Your sales</span></div>
 </section>
 
+{% if max_tickets is not none %}
+<p class="muted small">
+  {% if remaining_tickets is not none and remaining_tickets <= 0 %}
+    <strong>Sold out</strong> — the {{ max_tickets }}-ticket cap has been reached. No more tickets can be sold.
+  {% else %}
+    <strong>{{ remaining_tickets }}</strong> of {{ max_tickets }} ticket slots remaining.
+  {% endif %}
+</p>
+{% endif %}
+
 <div class="card form-card">
   <form id="issue-form" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -93,11 +103,14 @@
 const CATEGORY_SEATS = {{ categories | tojson }};
 // price per ticket for each category label
 const CATEGORY_PRICES = {{ prices | tojson }};
+// null when there's no cap; otherwise how many ticket slots are left right now
+const REMAINING_TICKETS = {{ remaining_tickets | tojson }};
 
 const categorySelect = document.getElementById('category');
 const guestFieldsContainer = document.getElementById('guest-fields');
 const categoryHint = document.getElementById('category-hint');
 const submitPlural = document.getElementById('submit-plural');
+const submitButton = document.querySelector('#issue-form button[type="submit"]');
 
 function money(n) {
   return '₦' + Number(n).toLocaleString('en-NG');
@@ -107,6 +120,7 @@ function renderGuestFields() {
   const category = categorySelect.value;
   const seats = CATEGORY_SEATS[category] || 1;
   const price = CATEGORY_PRICES[category] || 0;
+  const oversold = REMAINING_TICKETS !== null && seats > REMAINING_TICKETS;
 
   guestFieldsContainer.innerHTML = '';
 
@@ -123,23 +137,33 @@ function renderGuestFields() {
       <input type="text" value="${money(price)}" disabled>
     `;
     guestFieldsContainer.appendChild(block);
-    return;
+  } else {
+    submitPlural.textContent = 's';
+    categoryHint.textContent = `${seats} separate tickets will be issued, each billed at ${money(price)} (total ${money(price * seats)}). Every guest gets their own ticket and QR code.`;
+
+    for (let i = 1; i <= seats; i++) {
+      const block = document.createElement('div');
+      block.className = 'guest-block';
+      block.innerHTML = `
+        <h3 class="guest-block-title">Guest ${i} of ${seats}</h3>
+        <label for="guest_name_${i}">Guest Name</label>
+        <input type="text" id="guest_name_${i}" name="guest_name_${i}" placeholder="e.g. Ibrahim Bolanle" required>
+        <label for="guest_whatsapp_${i}">WhatsApp Number</label>
+        <input type="tel" id="guest_whatsapp_${i}" name="guest_whatsapp_${i}" placeholder="e.g. 08012345678" required>
+      `;
+      guestFieldsContainer.appendChild(block);
+    }
   }
 
-  submitPlural.textContent = 's';
-  categoryHint.textContent = `${seats} separate tickets will be issued, each billed at ${money(price)} (total ${money(price * seats)}). Every guest gets their own ticket and QR code.`;
-
-  for (let i = 1; i <= seats; i++) {
-    const block = document.createElement('div');
-    block.className = 'guest-block';
-    block.innerHTML = `
-      <h3 class="guest-block-title">Guest ${i} of ${seats}</h3>
-      <label for="guest_name_${i}">Guest Name</label>
-      <input type="text" id="guest_name_${i}" name="guest_name_${i}" placeholder="e.g. Ibrahim Bolanle" required>
-      <label for="guest_whatsapp_${i}">WhatsApp Number</label>
-      <input type="tel" id="guest_whatsapp_${i}" name="guest_whatsapp_${i}" placeholder="e.g. 08012345678" required>
-    `;
-    guestFieldsContainer.appendChild(block);
+  // Enforce the overall ticket cap client-side too — the server checks
+  // again on submit regardless, but this saves a wasted round trip.
+  if (oversold) {
+    categoryHint.textContent = REMAINING_TICKETS <= 0
+      ? 'Sold out — no ticket slots remain.'
+      : `Only ${REMAINING_TICKETS} slot(s) remain — ${category} needs ${seats}.`;
+    submitButton.disabled = true;
+  } else {
+    submitButton.disabled = false;
   }
 }
 
@@ -190,6 +214,17 @@ issueForm.addEventListener('submit', (event) => {
 });
 
 document.getElementById('cancel-review').addEventListener('click', () => { confirmModal.hidden = true; document.body.classList.remove('modal-open'); });
-document.getElementById('confirm-review').addEventListener('click', () => { issueForm.submit(); });
+document.getElementById('confirm-review').addEventListener('click', () => {
+  if (submitButton.disabled) {
+    // Cap may have filled up while this modal was open (e.g. auto-refresh
+    // hasn't fired yet) — the server will reject it anyway, but avoid a
+    // pointless submit and tell the handler why.
+    confirmModal.hidden = true;
+    document.body.classList.remove('modal-open');
+    alert('Ticket slots ran out while this was open. Please check the remaining count and try again.');
+    return;
+  }
+  issueForm.submit();
+});
 </script>
 {% endblock %}
