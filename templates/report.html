@@ -39,6 +39,15 @@
       <button type="submit">Save ticket cap</button>
     </form>
   </div>
+  <div class="card event-control-card"><span class="eyebrow">EVENT &amp; SCANNING</span><h2>Event date</h2><p class="muted small">In automatic mode, ticket sales close at the start of the event date and scanning opens automatically. You can also force scanning on or off.</p>
+    <form method="post" action="{{ url_for('update_event_settings') }}" class="pricing-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="pricing-row"><label for="event_date">Event date</label><input type="date" id="event_date" name="event_date" value="{{ event_date.isoformat() if event_date else '' }}"></div>
+      <div class="pricing-row"><label for="scan_mode">Scan feature</label><select id="scan_mode" name="scan_mode"><option value="auto"{% if scan_mode == 'auto' %} selected{% endif %}>Automatic (use event date)</option><option value="enabled"{% if scan_mode == 'enabled' %} selected{% endif %}>Enabled now</option><option value="disabled"{% if scan_mode == 'disabled' %} selected{% endif %}>Disabled</option></select></div>
+      <p class="muted small event-status-note">Current: {% if scan_enabled %}<strong>Scanning is available.</strong>{% else %}<strong>Scanning is locked.</strong>{% endif %} {% if event_date %}Event date: {{ event_date.strftime('%d %b %Y') }}.{% else %}No event date set.{% endif %} {% if not sales_open and event_date %}Ticket sales are closed.{% endif %}</p>
+      <button type="submit">Save event settings</button>
+    </form>
+  </div>
   <div class="card"><span class="eyebrow">WALK-IN PRICING</span><h2>Walk-in table prices</h2><p class="muted small">Separate from the pre-sold ticket prices above — used only when recording a walk-in table for guests already at the event.</p>
     <form method="post" action="{{ url_for('update_walkin_price') }}" class="pricing-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -64,6 +73,9 @@
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="table-action danger-action" type="submit">Remove</button></form>{% else %}<span class="muted small">Admin</span>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div></section>
 
+
+<section class="admin-section"><div class="card danger-zone"><span class="eyebrow">SELLER CLEANUP</span><h2>Clear removed sellers</h2><p class="muted small">Permanently removes seller accounts that were already marked as removed. Their ticket, sales and audit records stay in the database; the seller account itself is deleted.</p><form method="post" action="{{ url_for('clear_removed_sellers') }}" class="reset-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="text" name="confirmation" placeholder="Type CLEAR SELLERS" autocomplete="off" required><button type="submit" class="danger-button">Clear removed sellers</button></form></div></section>
 <section class="admin-section"><div class="card danger-zone"><span class="eyebrow">DEVELOPER / FAILSAFE</span><h2>Clear ticket history</h2><p class="muted small">This deletes all tickets and check-in history, resetting ticketing to zero. Users and seller accounts are not deleted.</p><form method="post" action="{{ url_for('reset_tickets') }}" class="reset-form">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="text" name="confirmation" placeholder="Type RESET" autocomplete="off" required><button type="submit" class="danger-button">Clear all ticket history</button></form></div></section>
 {% endblock %}
