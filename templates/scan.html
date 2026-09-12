@@ -31,6 +31,48 @@
   </div>
 </div>
 
+<style>
+  /* FIX: [hidden] can get overridden by base .btn CSS (same class-specificity
+     issue as the sell.html modal), which was letting "Confirm Check-in" show
+     even when JS had set it hidden for non-FOUND results. !important forces it. */
+  #scan-confirm[hidden] {
+    display: none !important;
+  }
+
+  /* FIX: make the result overlay scroll internally so the action buttons
+     never fall outside the visible viewport, regardless of how much detail
+     (e.g. a long MULTIPLE match list) is shown above them. */
+  #scan-overlay.scan-overlay[hidden] {
+    display: none;
+  }
+  #scan-overlay.scan-overlay:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 24px 12px;
+  }
+  #scan-overlay .scan-result-card {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 48px);
+    width: 100%;
+    overflow: hidden;
+  }
+  #scan-overlay .scan-guest {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  #scan-overlay .scan-actions {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    background: inherit;
+    padding-top: 12px;
+  }
+</style>
+
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 <script>
 const input = document.getElementById('scanner-input');
