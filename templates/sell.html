@@ -13,13 +13,17 @@
 </section>
 
 {% if max_tickets is not none %}
-<p class="muted small">
-  {% if remaining_tickets is not none and remaining_tickets <= 0 %}
-    <strong>Sold out</strong> — the {{ max_tickets }}-ticket cap has been reached. No more tickets can be sold.
-  {% else %}
-    <strong>{{ remaining_tickets }}</strong> of {{ max_tickets }} ticket slots remaining.
-  {% endif %}
-</p>
+<div class="card" style="margin-bottom:16px; {% if remaining_tickets is not none and remaining_tickets <= 0 %}border: 2px solid #ed5b63;{% endif %}">
+  <span class="eyebrow">CAPACITY</span>
+  <h2 style="margin:6px 0;">
+    {% if remaining_tickets is not none and remaining_tickets <= 0 %}
+      <span style="color:#ed5b63;">Sold out</span>
+    {% else %}
+      {{ remaining_tickets }} of {{ max_tickets }} slots remaining
+    {% endif %}
+  </h2>
+  <p class="muted small">{{ overall.sold }} tickets sold so far out of a maximum of {{ max_tickets }}. Check this before promising a table — a Table of 4 needs 4 free slots, not just 1.</p>
+</div>
 {% endif %}
 
 <div class="card form-card">
@@ -110,7 +114,6 @@ const categorySelect = document.getElementById('category');
 const guestFieldsContainer = document.getElementById('guest-fields');
 const categoryHint = document.getElementById('category-hint');
 const submitPlural = document.getElementById('submit-plural');
-const submitButton = document.querySelector('#issue-form button[type="submit"]');
 
 function money(n) {
   return '₦' + Number(n).toLocaleString('en-NG');
@@ -120,7 +123,6 @@ function renderGuestFields() {
   const category = categorySelect.value;
   const seats = CATEGORY_SEATS[category] || 1;
   const price = CATEGORY_PRICES[category] || 0;
-  const oversold = REMAINING_TICKETS !== null && seats > REMAINING_TICKETS;
 
   guestFieldsContainer.innerHTML = '';
 
@@ -155,16 +157,19 @@ function renderGuestFields() {
     }
   }
 
-  // Enforce the overall ticket cap client-side too — the server checks
-  // again on submit regardless, but this saves a wasted round trip.
-  if (oversold) {
-    categoryHint.textContent = REMAINING_TICKETS <= 0
-      ? 'Sold out — no ticket slots remain.'
-      : `Only ${REMAINING_TICKETS} slot(s) remain — ${category} needs ${seats}.`;
-    submitButton.disabled = true;
-  } else {
-    submitButton.disabled = false;
+  // Informative only — the actual gate (with a clear popup) happens on submit,
+  // not here. A silently-disabled button looked broken to handlers.
+  const capIssue = capacityMessage(seats);
+  if (capIssue) {
+    categoryHint.textContent = capIssue;
   }
+}
+
+function capacityMessage(seats) {
+  if (REMAINING_TICKETS === null) return null;
+  if (REMAINING_TICKETS <= 0) return 'Maximum number of tickets for this event has been reached. No more tickets can be sold.';
+  if (seats > REMAINING_TICKETS) return `Only ${REMAINING_TICKETS} slot(s) remain — this category needs ${seats}. Not enough slots for this sale.`;
+  return null;
 }
 
 categorySelect.addEventListener('change', renderGuestFields);
@@ -181,6 +186,12 @@ issueForm.addEventListener('submit', (event) => {
   const category = categorySelect.value;
   const seats = CATEGORY_SEATS[category] || 1;
   const price = CATEGORY_PRICES[category] || 0;
+
+  const capIssue = capacityMessage(seats);
+  if (capIssue) {
+    alert(capIssue);
+    return;
+  }
 
   reviewGrid.innerHTML = '';
   const catRow = document.createElement('div');
@@ -215,13 +226,16 @@ issueForm.addEventListener('submit', (event) => {
 
 document.getElementById('cancel-review').addEventListener('click', () => { confirmModal.hidden = true; document.body.classList.remove('modal-open'); });
 document.getElementById('confirm-review').addEventListener('click', () => {
-  if (submitButton.disabled) {
+  const category = categorySelect.value;
+  const seats = CATEGORY_SEATS[category] || 1;
+  const capIssue = capacityMessage(seats);
+  if (capIssue) {
     // Cap may have filled up while this modal was open (e.g. auto-refresh
-    // hasn't fired yet) — the server will reject it anyway, but avoid a
-    // pointless submit and tell the handler why.
+    // hasn't fired yet) — the server will reject it anyway, but this
+    // explains why instead of just failing silently.
     confirmModal.hidden = true;
     document.body.classList.remove('modal-open');
-    alert('Ticket slots ran out while this was open. Please check the remaining count and try again.');
+    alert(capIssue);
     return;
   }
   issueForm.submit();
