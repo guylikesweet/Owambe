@@ -9,7 +9,7 @@
 
   {% if tickets|length > 1 %}
   <p class="muted small center">
-    {{ ticket.category }} · Table ID <strong><a href="{{ url_for('all_tickets', q=ticket.table_id) }}">{{ ticket.table_id }}</a></strong> · {{ tickets|length }} independent tickets, each with its own QR code.
+    {{ ticket.category }} · Table <strong><a href="{{ url_for('all_tickets', q=ticket.table_id) }}">{{ ticket.table_number }}</a></strong> · {{ tickets|length }} independent tickets, each with its own QR code.
   </p>
   {% endif %}
 
