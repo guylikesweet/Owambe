@@ -39,9 +39,64 @@
 
   <footer class="site-footer">Powered by <strong>Oma</strong></footer>
 </div>
-</body>
-</html>
+
 <script>
 document.addEventListener('click',e=>{const b=e.target.closest('.password-toggle');if(!b)return;const i=b.parentElement.querySelector('input');i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'◉':'◉';b.setAttribute('aria-label',i.type==='password'?'Show password':'Hide password')});
 function softNotify(){try{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain();o.frequency.value=520;g.gain.setValueAtTime(.035,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.12);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.12)}catch(e){}}
 </script>
+
+<script>
+// Site-wide auto-refresh: polls a lightweight version signature and
+// reloads the page automatically when the underlying data has changed,
+// so nobody needs to hit Ctrl-R to see new ticket sales, check-ins,
+// price/commission updates, etc.
+(function () {
+  const POLL_MS = 5000;
+  const VERSION_URL = "{{ url_for('api_data_version') }}";
+  let baselineVersion = null;
+
+  function shouldDeferReload() {
+    // Don't yank someone out of an open modal (sell confirmation, scan
+    // check-in) or while they're actively typing into a field.
+    if (document.body.classList.contains('modal-open')) return true;
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  }
+
+  async function fetchVersion() {
+    try {
+      const res = await fetch(VERSION_URL, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.version;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function poll() {
+    const v = await fetchVersion();
+    if (v !== null) {
+      if (baselineVersion === null) {
+        baselineVersion = v;
+      } else if (v !== baselineVersion) {
+        if (!shouldDeferReload()) {
+          location.reload();
+          return; // page is reloading, no need to schedule another poll
+        }
+        // Still changed but unsafe to reload right now (modal open / typing) —
+        // keep the old baseline so we retry on the next tick.
+      }
+    }
+    setTimeout(poll, POLL_MS);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(poll, POLL_MS);
+  });
+})();
+</script>
+</body>
+</html>
