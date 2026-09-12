@@ -45,11 +45,21 @@ document.addEventListener('click',e=>{const b=e.target.closest('.password-toggle
 function softNotify(){try{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain();o.frequency.value=520;g.gain.setValueAtTime(.035,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.12);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.12)}catch(e){}}
 </script>
 
+{% if session.get('user_id') %}
 <script>
 // Site-wide auto-refresh: polls a lightweight version signature and
 // reloads the page automatically when the underlying data has changed,
 // so nobody needs to hit Ctrl-R to see new ticket sales, check-ins,
 // price/commission updates, etc.
+//
+// FIX: this whole block is now gated behind "session.get('user_id')" above
+// so it never runs on pages where nobody is logged in (e.g. /login). It
+// used to run everywhere, which meant the login page kept quietly polling
+// a login-required endpoint, getting redirected, and — because that
+// endpoint's decorator called session.clear() on every anonymous hit —
+// silently deleting the CSRF token embedded in the login form the person
+// was about to submit. See the login_required() fix in app.py for the
+// other half of this fix.
 (function () {
   const POLL_MS = 5000;
   const VERSION_URL = "{{ url_for('api_data_version') }}";
@@ -98,5 +108,6 @@ function softNotify(){try{const c=new AudioContext(),o=c.createOscillator(),g=c.
   });
 })();
 </script>
+{% endif %}
 </body>
 </html>
