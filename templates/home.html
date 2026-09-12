@@ -16,6 +16,16 @@
   <div class="stat-card"><span class="stat-value">₦{{ "{:,}".format(overall.cash) }}</span><span class="stat-label">Overall cash</span></div>
 </section>
 
+{% if max_tickets is not none %}
+<p class="muted small" style="margin-top:-8px;">
+  {% if remaining_tickets is not none and remaining_tickets <= 0 %}
+    <strong>Sold out</strong> — the {{ max_tickets }}-ticket cap has been reached.
+  {% else %}
+    <strong>{{ remaining_tickets }}</strong> of {{ max_tickets }} ticket slots remaining.
+  {% endif %}
+</p>
+{% endif %}
+
 <section class="stats-grid stats-grid-3 personal-stats">
   <div class="stat-card compact"><span class="stat-value">{{ mine.sold }}</span><span class="stat-label">Your tickets sold</span></div>
   <div class="stat-card compact"><span class="stat-value">{{ mine.used }}</span><span class="stat-label">Your check-ins</span></div>
@@ -26,7 +36,10 @@
   <a class="action-card primary-action" href="{{ url_for('sell') }}"><span class="action-icon">＋</span><span><strong>Sell a ticket</strong><small>Enter guest details and issue a QR</small></span></a>
   <a class="action-card" href="{{ url_for('scan') }}"><span class="action-icon">⌁</span><span><strong>Scan / check in</strong><small>Validate a QR, ticket code or WhatsApp</small></span></a>
   <a class="action-card" href="{{ url_for('all_tickets') }}"><span class="action-icon">▦</span><span><strong>All tickets</strong><small>Search every ticket and download its QR</small></span></a>
+  <a class="action-card" href="{{ url_for('tables') }}"><span class="action-icon">▤</span><span><strong>All tables</strong><small>See every table and who's on it</small></span></a>
+  <a class="action-card" href="{{ url_for('upgrade_ticket') }}"><span class="action-icon">⇪</span><span><strong>Upgrade tickets</strong><small>Group regular tickets into a table</small></span></a>
   {% if user.role == 'admin' %}
+  <a class="action-card" href="{{ url_for('create_table') }}"><span class="action-icon">⊞</span><span><strong>Walk-in table</strong><small>Record a table for guests already here</small></span></a>
   <a class="action-card" href="{{ url_for('report') }}"><span class="action-icon">◫</span><span><strong>Admin controls</strong><small>Sellers, pricing, totals and reset tools</small></span></a>
   {% endif %}
   <a class="action-card" href="{{ url_for('change_password') }}"><span class="action-icon">⚿</span><span><strong>Change password</strong><small>Update your sign-in credentials</small></span></a>
