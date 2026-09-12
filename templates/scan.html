@@ -121,11 +121,11 @@ function guestDetailRows(data) {
   if (data.whatsapp) rows.push(`<div><span>WhatsApp</span><strong>${escapeHtml(data.whatsapp)}</strong></div>`);
   if (data.ticket_code) rows.push(`<div><span>Ticket</span><strong>${escapeHtml(data.ticket_code)}</strong></div>`);
   if (data.category) rows.push(`<div><span>Category</span><strong>${escapeHtml(data.category)}</strong></div>`);
-  if (data.table_id) rows.push(`<div><span>Table</span><strong>${escapeHtml(data.table_id)} · ${escapeHtml(data.seat || '')}</strong></div>`);
+  if (data.table_number) rows.push(`<div><span>Table</span><strong>Table ${escapeHtml(String(data.table_number))} · ${escapeHtml(data.seat || '')}</strong></div>`);
   // Tell the handler at a glance what to say/do with this guest.
   if (data.category) {
-    const guidance = data.table_id
-      ? `🍽️ Has a table — direct them to table ${escapeHtml(data.table_id)}${data.seat ? ' (' + escapeHtml(data.seat) + ')' : ''}.`
+    const guidance = data.table_number
+      ? `🍽️ Has a table — direct them to Table ${escapeHtml(String(data.table_number))}${data.seat ? ' (' + escapeHtml(data.seat) + ')' : ''}.`
       : `👋 Regular guest — just welcome them, have a nice time!`;
     rows.push(`<div class="guidance-note" style="grid-column:1/-1; margin-top:8px; font-weight:600;">${guidance}</div>`);
   }
