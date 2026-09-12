@@ -996,7 +996,11 @@ def api_confirm_checkin():
         return {"status": "ALREADY_USED", "msg": "This ticket was just checked in by someone else.", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
     get_db().commit()
     log_audit(ticket["id"], "checked_in", g.user["id"], "Confirmed at door")
-    return {"status": "CHECKED_IN", "msg": "Entry approved.", "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"]}
+    return {
+        "status": "CHECKED_IN", "msg": "Entry approved.",
+        "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"],
+        "category": ticket.get("category") or "Regular", "table_id": ticket.get("table_id"), "seat": ticket.get("seat"),
+    }
 
 @app.route("/check_ticket", methods=["POST"])
 @login_required()
