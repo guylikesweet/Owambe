@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Create Walk-in Table · {{ event_name }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><span class="eyebrow">WALK-IN TABLE</span><h1>Record a walk-in table</h1><p>For guests already at the event who want to group together and pay for a table. No tickets or QR codes are generated — this just records the table.</p></div>
+  <a href="{{ url_for('tables') }}" class="btn secondary">All Tables</a>
+</div>
+
+<div class="card form-card">
+  <form id="walkin-form" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="category">Table Category</label>
+    <select id="category" name="category">
+      {% for label in categories.keys() %}
+      <option value="{{ label }}">{{ label }} (party of {{ category_seats[label] }}) — default ₦{{ "{:,}".format(walkin_prices[label]) }}</option>
+      {% endfor %}
+    </select>
+
+    <p class="muted small" id="category-hint"></p>
+
+    <div id="guest-fields"></div>
+
+    <label for="amount_paid">Amount Paid (₦)</label>
+    <input type="number" min="0" id="amount_paid" name="amount_paid" required>
+    <p class="muted small">Pre-filled with the default walk-in price for this category — adjust if a different amount was agreed.</p>
+
+    <button type="submit">Record Walk-in Table</button>
+  </form>
+</div>
+
+<script>
+const CATEGORY_SEATS = {{ category_seats | tojson }};
+const WALKIN_PRICES = {{ walkin_prices | tojson }};
+
+const categorySelect = document.getElementById('category');
+const guestFieldsContainer = document.getElementById('guest-fields');
+const categoryHint = document.getElementById('category-hint');
+const amountInput = document.getElementById('amount_paid');
+
+function money(n) {
+  return '₦' + Number(n).toLocaleString('en-NG');
+}
+
+function renderGuestFields() {
+  const category = categorySelect.value;
+  const seats = CATEGORY_SEATS[category] || 4;
+  const price = WALKIN_PRICES[category] || 0;
+
+  categoryHint.textContent = `${seats} guest names needed for this table.`;
+  amountInput.value = price;
+
+  guestFieldsContainer.innerHTML = '';
+  for (let i = 1; i <= seats; i++) {
+    const block = document.createElement('div');
+    block.innerHTML = `
+      <label for="guest_name_${i}">Guest ${i} of ${seats} — Name</label>
+      <input type="text" id="guest_name_${i}" name="guest_name_${i}" placeholder="e.g. Ibrahim Bolanle" required>
+    `;
+    guestFieldsContainer.appendChild(block);
+  }
+}
+
+categorySelect.addEventListener('change', renderGuestFields);
+renderGuestFields();
+</script>
+{% endblock %}
