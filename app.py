@@ -87,6 +87,11 @@ def unique_table_id():
         tid = generate_table_id()
     return tid
 
+def next_table_number():
+    """Friendly sequential number ('Table 1', 'Table 2', ...) shown to
+    handlers and guests. table_id stays internal/backend-only."""
+    return query("SELECT nextval('table_number_seq') AS n").fetchone()["n"]
+
 def lagos_now():
     return datetime.now(LAGOS_TZ)
 
@@ -141,6 +146,9 @@ def init_db():
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Regular'")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS table_id TEXT")
     query("CREATE INDEX IF NOT EXISTS idx_tickets_table_id ON tickets(table_id)")
+    query("CREATE SEQUENCE IF NOT EXISTS table_number_seq START 1")
+    query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS table_number INTEGER")
+    query("ALTER TABLE walkin_tables ADD COLUMN IF NOT EXISTS table_number INTEGER")
     missing = query("SELECT id FROM tickets WHERE ticket_code IS NULL OR ticket_code = ''").fetchall()
     for row in missing:
         code = generate_ticket_code()
@@ -148,6 +156,23 @@ def init_db():
             code = generate_ticket_code()
         query("UPDATE tickets SET ticket_code = %s WHERE id = %s", (code, row["id"]))
     query("UPDATE tickets SET qr_data = ticket_code WHERE qr_data IS NULL OR qr_data = ''")
+    # Assign friendly "Table N" numbers to any existing tables that predate
+    # this feature, in chronological order, so numbering feels natural.
+    unnumbered_ticket_tables = query(
+        "SELECT table_id, MIN(created_at) AS first_created FROM tickets WHERE table_id IS NOT NULL AND table_number IS NULL GROUP BY table_id"
+    ).fetchall()
+    unnumbered_walkin_tables = query(
+        "SELECT id, created_at FROM walkin_tables WHERE table_number IS NULL"
+    ).fetchall()
+    to_number = [("ticket", r["table_id"], r["first_created"] or "") for r in unnumbered_ticket_tables]
+    to_number += [("walkin", r["id"], r["created_at"] or "") for r in unnumbered_walkin_tables]
+    to_number.sort(key=lambda x: x[2])
+    for kind, ref, _ in to_number:
+        num = query("SELECT nextval('table_number_seq') AS n").fetchone()["n"]
+        if kind == "ticket":
+            query("UPDATE tickets SET table_number = %s WHERE table_id = %s", (num, ref))
+        else:
+            query("UPDATE walkin_tables SET table_number = %s WHERE id = %s", (num, ref))
     query("INSERT INTO app_settings (key, value) VALUES ('ticket_price', %s) ON CONFLICT (key) DO NOTHING", (str(DEFAULT_TICKET_PRICE),))
     for slug in CATEGORY_SLUGS.values():
         query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (f"price_{slug}", str(DEFAULT_TICKET_PRICE)))
@@ -318,7 +343,8 @@ def build_ticket_pdf(ticket):
 
     category = ticket.get("category") or "Regular"
     if ticket.get("table_id"):
-        ticket_type_display = f"{category} \u2022 {ticket.get('seat', '')}"
+        table_label = f"Table {ticket.get('table_number')}" if ticket.get("table_number") else "Table"
+        ticket_type_display = f"{category} \u2022 {table_label} \u2022 {ticket.get('seat', '')}"
     else:
         ticket_type_display = category
 
@@ -389,14 +415,8 @@ def original_admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         user = current_user()
-        if not user or not user["active"]:
-            # Only clear the session for a user who WAS logged in but is now
-            # inactive. For a plain anonymous visitor (e.g. an expired session
-            # or a background poll from a page that isn't logged in), clearing
-            # here would also wipe the CSRF token embedded in whatever page
-            # they're currently looking at, breaking their next form submit.
-            if user and not user["active"]:
-                session.clear()
+        if not user or not user["active"] or user["role"]!= "admin":
+            session.clear() if not user or not user["active"] else None
             flash("Only the original administrator can access this feature.", "error")
             return redirect(url_for("home"))
         original = query("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
@@ -413,15 +433,8 @@ def login_required(role=None):
         def wrapper(*args, **kwargs):
             user = current_user()
             if not user or not user["active"]:
-                # Only clear the session for a user who WAS logged in but is now
-                # inactive. For a plain anonymous visitor (e.g. the login page's
-                # background auto-refresh poll, which runs unauthenticated),
-                # clearing the session here would also wipe the CSRF token
-                # embedded in the login form they're currently looking at,
-                # causing "Invalid or missing CSRF token" on their next submit
-                # even though they did nothing wrong.
+                session.clear()
                 if user and not user["active"]:
-                    session.clear()
                     flash("This seller account has been removed. Please contact an administrator.", "error")
                 return redirect(url_for("login"))
             if role and user["role"]!= role:
@@ -687,7 +700,10 @@ def sell():
             current_count = get_active_ticket_count()
             if current_count + seats > max_tickets:
                 remaining = max(max_tickets - current_count, 0)
-                flash(f"Not enough slots left — only {remaining} of {max_tickets} ticket slot(s) remain, but this sale needs {seats}.", "error")
+                if remaining <= 0:
+                    flash("Maximum number of tickets for this event has been reached. No more tickets can be sold.", "error")
+                else:
+                    flash(f"Only {remaining} ticket slot(s) remain — {category} needs {seats}. Not enough slots left for this sale.", "error")
                 return redirect(url_for("sell"))
 
         price = prices.get(category, DEFAULT_TICKET_PRICE)
@@ -719,12 +735,13 @@ def sell():
             guests.append((g_name, g_whatsapp))
 
         table_id = unique_table_id()
+        table_number = next_table_number()
         first_id = None
         for i, (g_name, g_whatsapp) in enumerate(guests, start=1):
             ticket_code = unique_ticket_code()
             row = query(
-                "INSERT INTO tickets (ticket_code, name, whatsapp, seat, category, table_id, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-                (ticket_code, g_name, g_whatsapp, f"Guest {i} of {seats}", category, table_id, created, user["id"], price, ticket_code),
+                "INSERT INTO tickets (ticket_code, name, whatsapp, seat, category, table_id, table_number, created_at, sold_by, amount_paid, qr_data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (ticket_code, g_name, g_whatsapp, f"Guest {i} of {seats}", category, table_id, table_number, created, user["id"], price, ticket_code),
             ).fetchone()
             if first_id is None:
                 first_id = row["id"]
@@ -942,7 +959,7 @@ def _ticket_status_payload(ticket):
         "whatsapp": ticket["whatsapp"],
         "ticket_code": ticket["ticket_code"],
         "category": ticket.get("category") or "Regular",
-        "table_id": ticket.get("table_id"),
+        "table_number": ticket.get("table_number"),
         "seat": ticket.get("seat"),
         "amount_paid": ticket["amount_paid"],
     }
@@ -1012,7 +1029,7 @@ def api_confirm_checkin():
     return {
         "status": "CHECKED_IN", "msg": "Entry approved.",
         "name": ticket["name"], "whatsapp": ticket["whatsapp"], "ticket_code": ticket["ticket_code"],
-        "category": ticket.get("category") or "Regular", "table_id": ticket.get("table_id"), "seat": ticket.get("seat"),
+        "category": ticket.get("category") or "Regular", "table_number": ticket.get("table_number"), "seat": ticket.get("seat"),
     }
 
 @app.route("/check_ticket", methods=["POST"])
@@ -1072,12 +1089,13 @@ def create_table():
             flash("Amount paid must be a valid non-negative number.", "error")
             return redirect(url_for("create_table"))
         table_ref = unique_table_id()
+        table_number = next_table_number()
         query(
-            "INSERT INTO walkin_tables (table_ref, category, guest_names, amount_paid, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
-            (table_ref, category, "\n".join(names), amount, g.user["id"], lagos_timestamp()),
+            "INSERT INTO walkin_tables (table_ref, category, guest_names, amount_paid, created_by, created_at, table_number) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (table_ref, category, "\n".join(names), amount, g.user["id"], lagos_timestamp(), table_number),
         )
         get_db().commit()
-        flash(f"Walk-in table {table_ref} recorded for {category} — ₦{amount:,}.", "success")
+        flash(f"Walk-in Table {table_number} recorded for {category} — ₦{amount:,}.", "success")
         return redirect(url_for("tables"))
     return render_template(
         "create_table.html", event_name=EVENT_NAME, user=g.user,
@@ -1098,7 +1116,7 @@ def tables():
     for t in ticket_rows:
         tid = t["table_id"]
         ticket_tables.setdefault(tid, {
-            "table_ref": tid, "category": t["category"], "source": "ticket",
+            "table_ref": tid, "table_number": t["table_number"], "category": t["category"], "source": "ticket",
             "guests": [], "amount_total": 0, "sold_by": t["username"], "created_at": t["created_at"],
         })
         ticket_tables[tid]["guests"].append({
@@ -1110,13 +1128,13 @@ def tables():
         "SELECT w.*, u.username FROM walkin_tables w LEFT JOIN users u ON w.created_by = u.id ORDER BY w.id DESC"
     ).fetchall()
     walkin_list = [{
-        "table_ref": w["table_ref"], "category": w["category"], "source": "walkin",
+        "table_ref": w["table_ref"], "table_number": w["table_number"], "category": w["category"], "source": "walkin",
         "guests": [{"name": n} for n in (w["guest_names"] or "").split("\n") if n],
         "amount_total": w["amount_paid"], "sold_by": w["username"], "created_at": w["created_at"],
     } for w in walkin_rows]
 
     all_tables = list(ticket_tables.values()) + walkin_list
-    all_tables.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    all_tables.sort(key=lambda x: x["table_number"] or 0)
     return render_template("tables.html", event_name=EVENT_NAME, user=g.user, all_tables=all_tables)
 
 @app.route("/upgrade", methods=["GET", "POST"])
@@ -1161,19 +1179,20 @@ def upgrade_ticket():
         remainder = target_total - per_head_base * seats
 
         new_table_id = unique_table_id()
+        new_table_number = next_table_number()
         for i, t in enumerate(tickets_to_upgrade, start=1):
             per_head_price = per_head_base + (remainder if i == 1 else 0)
             query(
-                "UPDATE tickets SET category = %s, table_id = %s, seat = %s, amount_paid = %s WHERE id = %s",
-                (target_category, new_table_id, f"Guest {i} of {seats}", per_head_price, t["id"]),
+                "UPDATE tickets SET category = %s, table_id = %s, table_number = %s, seat = %s, amount_paid = %s WHERE id = %s",
+                (target_category, new_table_id, new_table_number, f"Guest {i} of {seats}", per_head_price, t["id"]),
             )
             log_audit(
                 t["id"], "upgraded", g.user["id"],
                 f"Upgraded from {t['category']} (₦{t['amount_paid']:,}) to {target_category} (₦{per_head_price:,}); "
-                f"table {new_table_id}; total balance collected for group: ₦{balance_due:,}",
+                f"Table {new_table_number}; total balance collected for group: ₦{balance_due:,}",
             )
         get_db().commit()
-        flash(f"Upgraded {seats} tickets to {target_category} (table {new_table_id}). Balance collected: ₦{balance_due:,}.", "success")
+        flash(f"Upgraded {seats} tickets to {target_category} (Table {new_table_number}). Balance collected: ₦{balance_due:,}.", "success")
         return redirect(url_for("tables"))
 
     q = request.args.get("q", "").strip()
