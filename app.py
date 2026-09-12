@@ -50,6 +50,8 @@ CATEGORY_SLUGS = {
     "Table of 7": "table7",
     "Table of 8": "table8",
 }
+# Only table categories (seats > 1) are eligible for walk-in creation / upgrades.
+WALKIN_CATEGORY_SLUGS = {label: slug for label, slug in CATEGORY_SLUGS.items() if CATEGORY_SEATS[label] > 1}
 
 def csrf_token():
     token = session.get("csrf_token")
@@ -80,7 +82,8 @@ def generate_table_id():
 
 def unique_table_id():
     tid = generate_table_id()
-    while query("SELECT 1 FROM tickets WHERE table_id = %s", (tid,)).fetchone():
+    while (query("SELECT 1 FROM tickets WHERE table_id = %s", (tid,)).fetchone()
+           or query("SELECT 1 FROM walkin_tables WHERE table_ref = %s", (tid,)).fetchone()):
         tid = generate_table_id()
     return tid
 
@@ -119,6 +122,7 @@ def init_db():
     query("""CREATE TABLE IF NOT EXISTS tickets (id SERIAL PRIMARY KEY, ticket_code TEXT UNIQUE, name TEXT NOT NULL, whatsapp TEXT NOT NULL, seat TEXT DEFAULT 'General', category TEXT NOT NULL DEFAULT 'Regular', table_id TEXT, used BOOLEAN DEFAULT FALSE, created_at TEXT, used_at TEXT, sold_by INTEGER REFERENCES users (id), amount_paid INTEGER NOT NULL DEFAULT 3500, qr_data TEXT)""")
     query("""CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
     query("""CREATE TABLE IF NOT EXISTS ticket_audit (id SERIAL PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets (id), action TEXT NOT NULL, performed_by INTEGER REFERENCES users (id), detail TEXT, created_at TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS walkin_tables (id SERIAL PRIMARY KEY, table_ref TEXT UNIQUE NOT NULL, category TEXT NOT NULL, guest_names TEXT NOT NULL, amount_paid INTEGER NOT NULL DEFAULT 0, created_by INTEGER REFERENCES users(id), created_at TEXT)""")
     query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS amount_paid INTEGER NOT NULL DEFAULT 3500")
     query("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS qr_data TEXT")
@@ -148,6 +152,9 @@ def init_db():
     for slug in CATEGORY_SLUGS.values():
         query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (f"price_{slug}", str(DEFAULT_TICKET_PRICE)))
     query("INSERT INTO app_settings (key, value) VALUES ('commission_rate', %s) ON CONFLICT (key) DO NOTHING", (str(DEFAULT_COMMISSION_RATE),))
+    for slug in WALKIN_CATEGORY_SLUGS.values():
+        query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (f"walkin_price_{slug}", str(DEFAULT_TICKET_PRICE)))
+    query("INSERT INTO app_settings (key, value) VALUES ('max_tickets', %s) ON CONFLICT (key) DO NOTHING", ("",))  # empty = no cap
     db.commit()
     user = query("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
     if not user:
@@ -181,6 +188,39 @@ def get_commission_rate():
         return float(row["value"])
     except (TypeError, ValueError):
         return DEFAULT_COMMISSION_RATE
+
+def get_walkin_prices():
+    """Separate price list for admin-created walk-in tables — independent
+    of the pre-sold ticket prices in get_ticket_prices()."""
+    rows = query("SELECT key, value FROM app_settings WHERE key LIKE %s", ("walkin_price_%",)).fetchall()
+    existing = {r["key"]: r["value"] for r in rows}
+    prices = {}
+    for label, slug in WALKIN_CATEGORY_SLUGS.items():
+        try:
+            prices[label] = int(existing.get(f"walkin_price_{slug}", DEFAULT_TICKET_PRICE))
+        except (TypeError, ValueError):
+            prices[label] = DEFAULT_TICKET_PRICE
+    return prices
+
+def get_max_tickets():
+    """Overall cap on pre-sold tickets (Regular + table categories). Walk-in
+    tables never count toward this. Returns None when there is no cap."""
+    row = query("SELECT value FROM app_settings WHERE key = 'max_tickets'").fetchone()
+    if not row or not row["value"].strip():
+        return None
+    try:
+        val = int(row["value"])
+        return val if val > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+def get_active_ticket_count():
+    row = query("SELECT COUNT(*) AS cnt FROM tickets WHERE cancelled = FALSE").fetchone()
+    return row["cnt"]
+
+def get_walkin_cash_total():
+    row = query("SELECT COALESCE(SUM(amount_paid),0) AS total FROM walkin_tables").fetchone()
+    return row["total"]
 
 def log_audit(ticket_id, action, performed_by, detail=""):
     query("INSERT INTO ticket_audit (ticket_id, action, performed_by, detail, created_at) VALUES (%s,%s,%s,%s,%s)", (ticket_id, action, performed_by, detail, lagos_timestamp()))
@@ -523,6 +563,52 @@ def update_commission():
     flash("Commission rate updated.", "success")
     return redirect(url_for("report"))
 
+@app.route("/admin/max_tickets", methods=["POST"])
+@login_required(role="admin")
+def update_max_tickets():
+    raw = request.form.get("max_tickets", "").replace(",", "").strip()
+    if raw == "" or raw == "0":
+        query("INSERT INTO app_settings (key, value) VALUES ('max_tickets', '') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value")
+        get_db().commit()
+        flash("Ticket cap removed — sales are now unlimited.", "success")
+        return redirect(url_for("report"))
+    try:
+        val = int(raw)
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        flash("Maximum tickets must be a non-negative number (leave blank or 0 for no cap).", "error")
+        return redirect(url_for("report"))
+    query("INSERT INTO app_settings (key, value) VALUES ('max_tickets', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (str(val),))
+    get_db().commit()
+    flash("Maximum ticket cap updated.", "success")
+    return redirect(url_for("report"))
+
+@app.route("/admin/walkin_price", methods=["POST"])
+@login_required(role="admin")
+def update_walkin_price():
+    updates = {}
+    for label, slug in WALKIN_CATEGORY_SLUGS.items():
+        raw = request.form.get(f"walkin_price_{slug}", "").replace(",", "").strip()
+        if raw == "":
+            continue
+        try:
+            price = int(raw)
+            if price < 0:
+                raise ValueError
+        except ValueError:
+            flash(f"Walk-in price for {label} must be a valid non-negative amount.", "error")
+            return redirect(url_for("report"))
+        updates[slug] = price
+    if not updates:
+        flash("No walk-in prices were submitted.", "error")
+        return redirect(url_for("report"))
+    for slug, price in updates.items():
+        query("INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (f"walkin_price_{slug}", str(price)))
+    get_db().commit()
+    flash("Walk-in table prices updated.", "success")
+    return redirect(url_for("report"))
+
 @app.route("/admin/reset_tickets", methods=["POST"])
 @original_admin_required
 def reset_tickets():
@@ -554,27 +640,43 @@ def report():
         s["total_commission"] = round(s["total_gross"] * commission_rate / 100)
     users = query("SELECT id, username, role, active FROM users ORDER BY role, active DESC, username").fetchall()
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE""").fetchone()
-    return render_template("report.html", sales=sales, users=users, overall=overall, prices=prices, categories=CATEGORY_SLUGS, event_name=EVENT_NAME, user=g.user, commission_rate=commission_rate)
+    overall["cash"] = overall["cash"] + get_walkin_cash_total()  # general cash-in includes walk-in tables, without counting them as tickets sold
+    walkin_prices = get_walkin_prices()
+    max_tickets = get_max_tickets()
+    return render_template("report.html", sales=sales, users=users, overall=overall, prices=prices, categories=CATEGORY_SLUGS, event_name=EVENT_NAME, user=g.user, commission_rate=commission_rate, walkin_prices=walkin_prices, walkin_categories=WALKIN_CATEGORY_SLUGS, max_tickets=max_tickets)
 
 @app.route("/")
 @login_required()
 def home():
     user = g.user
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE""").fetchone()
+    overall["cash"] = overall["cash"] + get_walkin_cash_total()
     mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE AND sold_by = %s""", (user["id"],)).fetchone()
-    return render_template("home.html", overall=overall, mine=mine, event_name=EVENT_NAME, user=user, ticket_price=get_ticket_price())
+    max_tickets = get_max_tickets()
+    active_count = get_active_ticket_count()
+    remaining_tickets = (max_tickets - active_count) if max_tickets is not None else None
+    return render_template("home.html", overall=overall, mine=mine, event_name=EVENT_NAME, user=user, ticket_price=get_ticket_price(), max_tickets=max_tickets, remaining_tickets=remaining_tickets)
 
 @app.route("/sell", methods=["GET", "POST"])
 @login_required()
 def sell():
     user = g.user
     prices = get_ticket_prices()
+    max_tickets = get_max_tickets()
     if request.method == "POST":
         category = request.form.get("category", "Regular").strip()
         if category not in CATEGORY_SEATS:
             flash("Please select a valid ticket category.", "error")
             return redirect(url_for("sell"))
         seats = CATEGORY_SEATS[category]
+
+        if max_tickets is not None:
+            current_count = get_active_ticket_count()
+            if current_count + seats > max_tickets:
+                remaining = max(max_tickets - current_count, 0)
+                flash(f"Not enough slots left — only {remaining} of {max_tickets} ticket slot(s) remain, but this sale needs {seats}.", "error")
+                return redirect(url_for("sell"))
+
         price = prices.get(category, DEFAULT_TICKET_PRICE)
         created = lagos_timestamp()
         db = get_db()
@@ -617,13 +719,17 @@ def sell():
         return redirect(url_for("ticket_issued", ticket_id=first_id))
 
     overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE""").fetchone()
+    overall["cash"] = overall["cash"] + get_walkin_cash_total()
     mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE AND sold_by = %s""", (user["id"],)).fetchone()
     recent = query("""SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC LIMIT 2""").fetchall()
+    active_count = get_active_ticket_count()
+    remaining_tickets = (max_tickets - active_count) if max_tickets is not None else None
     return render_template(
         "sell.html",
         overall=overall, mine=mine, recent=recent,
         prices=prices, categories=CATEGORY_SEATS,
         event_name=EVENT_NAME, user=user,
+        max_tickets=max_tickets, remaining_tickets=remaining_tickets,
     )
 
 @app.route("/tickets")
@@ -666,6 +772,15 @@ def all_tickets():
     for r in table_count_rows:
         if r["category"] in table_counts:
             table_counts[r["category"]] = r["table_count"]
+
+    # Walk-in tables need physical seating too, even though they aren't
+    # counted as "tickets sold" — fold them into the same table-prep counts.
+    walkin_table_count_rows = query(
+        "SELECT category, COUNT(*) AS table_count FROM walkin_tables GROUP BY category"
+    ).fetchall()
+    for r in walkin_table_count_rows:
+        if r["category"] in table_counts:
+            table_counts[r["category"]] += r["table_count"]
 
     return render_template(
         "tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user,
@@ -829,15 +944,18 @@ def api_data_version():
         """SELECT COUNT(*) AS cnt, COALESCE(MAX(id),0) AS max_id,
                   COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used_cnt,
                   COALESCE(SUM(CASE WHEN cancelled THEN 1 ELSE 0 END),0) AS cancelled_cnt,
-                  COALESCE(SUM(CASE WHEN refunded THEN 1 ELSE 0 END),0) AS refunded_cnt
+                  COALESCE(SUM(CASE WHEN refunded THEN 1 ELSE 0 END),0) AS refunded_cnt,
+                  COALESCE(SUM(amount_paid),0) AS amount_sum,
+                  COUNT(DISTINCT table_id) AS table_cnt
            FROM tickets"""
     ).fetchone()
+    w = query("SELECT COUNT(*) AS cnt, COALESCE(SUM(amount_paid),0) AS total FROM walkin_tables").fetchone()
     users_row = query(
         "SELECT COUNT(*) AS cnt, COALESCE(SUM(CASE WHEN active THEN 1 ELSE 0 END),0) AS active_cnt FROM users"
     ).fetchone()
     settings_rows = query("SELECT key, value FROM app_settings ORDER BY key").fetchall()
     settings_sig = "|".join(f"{r['key']}={r['value']}" for r in settings_rows)
-    version = f"{t['cnt']}-{t['max_id']}-{t['used_cnt']}-{t['cancelled_cnt']}-{t['refunded_cnt']}-{users_row['cnt']}-{users_row['active_cnt']}-{settings_sig}"
+    version = f"{t['cnt']}-{t['max_id']}-{t['used_cnt']}-{t['cancelled_cnt']}-{t['refunded_cnt']}-{t['amount_sum']}-{t['table_cnt']}-{w['cnt']}-{w['total']}-{users_row['cnt']}-{users_row['active_cnt']}-{settings_sig}"
     return {"version": version}
 
 @app.route("/api/lookup_ticket", methods=["POST"])
@@ -908,6 +1026,155 @@ def verify(ticket_code):
     if ticket["used"]:
         return {"status": "already_used", "name": ticket["name"], "time": ticket["used_at"]}
     return {"status": "found", "name": ticket["name"], "ticket_code": ticket["ticket_code"]}
+
+@app.route("/tables/create", methods=["GET", "POST"])
+@login_required(role="admin")
+def create_table():
+    """Admin-only: record a walk-in table for guests already at the event.
+    No tickets or QR codes are generated — just the record itself."""
+    walkin_prices = get_walkin_prices()
+    if request.method == "POST":
+        category = request.form.get("category", "").strip()
+        if category not in WALKIN_CATEGORY_SLUGS:
+            flash("Please select a valid table category.", "error")
+            return redirect(url_for("create_table"))
+        seats = CATEGORY_SEATS[category]
+        names = []
+        for i in range(1, seats + 1):
+            name = request.form.get(f"guest_name_{i}", "").strip()
+            if not name:
+                flash(f"Please provide the name for guest {i} of {seats}.", "error")
+                return redirect(url_for("create_table"))
+            names.append(name)
+        raw_amount = request.form.get("amount_paid", "").replace(",", "").strip()
+        try:
+            amount = int(raw_amount)
+            if amount < 0:
+                raise ValueError
+        except ValueError:
+            flash("Amount paid must be a valid non-negative number.", "error")
+            return redirect(url_for("create_table"))
+        table_ref = unique_table_id()
+        query(
+            "INSERT INTO walkin_tables (table_ref, category, guest_names, amount_paid, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
+            (table_ref, category, "\n".join(names), amount, g.user["id"], lagos_timestamp()),
+        )
+        get_db().commit()
+        flash(f"Walk-in table {table_ref} recorded for {category} — ₦{amount:,}.", "success")
+        return redirect(url_for("tables"))
+    return render_template(
+        "create_table.html", event_name=EVENT_NAME, user=g.user,
+        categories=WALKIN_CATEGORY_SLUGS, category_seats=CATEGORY_SEATS, walkin_prices=walkin_prices,
+    )
+
+@app.route("/tables")
+@login_required()
+def tables():
+    """Overview of every table — whether from a pre-sold ticket purchase,
+    a ticket upgrade, or an admin-created walk-in — with its guest list."""
+    ticket_rows = query(
+        """SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id
+           WHERE t.table_id IS NOT NULL AND t.cancelled = FALSE
+           ORDER BY t.table_id, t.id"""
+    ).fetchall()
+    ticket_tables = {}
+    for t in ticket_rows:
+        tid = t["table_id"]
+        ticket_tables.setdefault(tid, {
+            "table_ref": tid, "category": t["category"], "source": "ticket",
+            "guests": [], "amount_total": 0, "sold_by": t["username"], "created_at": t["created_at"],
+        })
+        ticket_tables[tid]["guests"].append({
+            "name": t["name"], "whatsapp": t["whatsapp"], "ticket_code": t["ticket_code"], "used": t["used"],
+        })
+        ticket_tables[tid]["amount_total"] += t["amount_paid"]
+
+    walkin_rows = query(
+        "SELECT w.*, u.username FROM walkin_tables w LEFT JOIN users u ON w.created_by = u.id ORDER BY w.id DESC"
+    ).fetchall()
+    walkin_list = [{
+        "table_ref": w["table_ref"], "category": w["category"], "source": "walkin",
+        "guests": [{"name": n} for n in (w["guest_names"] or "").split("\n") if n],
+        "amount_total": w["amount_paid"], "sold_by": w["username"], "created_at": w["created_at"],
+    } for w in walkin_rows]
+
+    all_tables = list(ticket_tables.values()) + walkin_list
+    all_tables.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    return render_template("tables.html", event_name=EVENT_NAME, user=g.user, all_tables=all_tables)
+
+@app.route("/upgrade", methods=["GET", "POST"])
+@login_required()
+def upgrade_ticket():
+    """Merge 2+ existing Regular tickets into a table. The tickets keep their
+    ticket codes but get a shared table_id, their category flips to the table
+    category, and their recorded amount_paid updates so the total matches the
+    table price — the difference is the balance the handler collects."""
+    if request.method == "POST":
+        target_category = request.form.get("category", "").strip()
+        if target_category not in WALKIN_CATEGORY_SLUGS:
+            flash("Please select a valid table category to upgrade to.", "error")
+            return redirect(url_for("upgrade_ticket"))
+        seats = CATEGORY_SEATS[target_category]
+        selected_ids = request.form.getlist("ticket_ids")
+        if len(selected_ids) != seats:
+            flash(f"{target_category} needs exactly {seats} tickets selected — you selected {len(selected_ids)}.", "error")
+            return redirect(url_for("upgrade_ticket"))
+        try:
+            ids = [int(i) for i in selected_ids]
+        except ValueError:
+            flash("Invalid ticket selection.", "error")
+            return redirect(url_for("upgrade_ticket"))
+
+        tickets_to_upgrade = []
+        for tid in ids:
+            t = query("SELECT * FROM tickets WHERE id = %s", (tid,)).fetchone()
+            if not t or t["cancelled"] or t["table_id"]:
+                flash("One of the selected tickets is no longer eligible (cancelled or already on a table).", "error")
+                return redirect(url_for("upgrade_ticket"))
+            tickets_to_upgrade.append(t)
+
+        prices = get_ticket_prices()
+        target_total = prices.get(target_category, DEFAULT_TICKET_PRICE) * seats
+        already_paid = sum(t["amount_paid"] for t in tickets_to_upgrade)
+        balance_due = max(target_total - already_paid, 0)
+
+        # Split the table's total price evenly across the seats, putting any
+        # rounding remainder on the first ticket so the sum stays exact.
+        per_head_base = target_total // seats
+        remainder = target_total - per_head_base * seats
+
+        new_table_id = unique_table_id()
+        for i, t in enumerate(tickets_to_upgrade, start=1):
+            per_head_price = per_head_base + (remainder if i == 1 else 0)
+            query(
+                "UPDATE tickets SET category = %s, table_id = %s, seat = %s, amount_paid = %s WHERE id = %s",
+                (target_category, new_table_id, f"Guest {i} of {seats}", per_head_price, t["id"]),
+            )
+            log_audit(
+                t["id"], "upgraded", g.user["id"],
+                f"Upgraded from {t['category']} (₦{t['amount_paid']:,}) to {target_category} (₦{per_head_price:,}); "
+                f"table {new_table_id}; total balance collected for group: ₦{balance_due:,}",
+            )
+        get_db().commit()
+        flash(f"Upgraded {seats} tickets to {target_category} (table {new_table_id}). Balance collected: ₦{balance_due:,}.", "success")
+        return redirect(url_for("tables"))
+
+    q = request.args.get("q", "").strip()
+    candidates = []
+    if q:
+        like = f"%{q}%"
+        candidates = query(
+            """SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id
+               WHERE t.table_id IS NULL AND t.cancelled = FALSE
+               AND (t.name ILIKE %s OR t.whatsapp ILIKE %s OR COALESCE(t.ticket_code,'') ILIKE %s)
+               ORDER BY t.id DESC""",
+            (like, like, like),
+        ).fetchall()
+    prices = get_ticket_prices()
+    return render_template(
+        "upgrade.html", event_name=EVENT_NAME, user=g.user, q=q, candidates=candidates,
+        categories=WALKIN_CATEGORY_SLUGS, category_seats=CATEGORY_SEATS, prices=prices,
+    )
 
 @app.route("/export")
 @login_required(role="admin")
