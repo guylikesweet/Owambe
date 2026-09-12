@@ -12,6 +12,17 @@
         <a href="{{ url_for('home') }}" class="btn secondary">Home</a>
     </div>
 </div>
+{% if not scan_enabled %}
+<div id="scan-locked-modal" class="scan-overlay scan-locked-overlay" aria-hidden="false">
+  <div class="scan-result-card scan-locked-card" role="dialog" aria-modal="true" aria-labelledby="scan-locked-title">
+    <div class="status-icon">🔒</div>
+    <span id="scan-locked-title" class="status-title invalid">SCANNING LOCKED</span>
+    <p class="status-message">{{ scan_block_reason }}</p>
+    {% if event_date_display %}<p class="muted small">Event date: <strong>{{ event_date_display }}</strong></p>{% endif %}
+    <a href="{{ url_for('home') }}" class="btn secondary">Back Home</a>
+  </div>
+</div>
+{% else %}
 <div class="card scanner-card">
   <div id="reader"></div>
   <form id="scan-form" autocomplete="off" onsubmit="return false;"><input type="text" id="scanner-input" placeholder="Ticket code or WhatsApp number"></form>
@@ -30,6 +41,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <style>
   /* FIX: [hidden] can get overridden by base .btn CSS (same class-specificity
@@ -73,7 +85,7 @@
   }
 </style>
 
-<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+{% if scan_enabled %}<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 <script>
 const input = document.getElementById('scanner-input');
 const overlay = document.getElementById('scan-overlay');
@@ -318,5 +330,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 window.addEventListener('beforeunload', () => {
     if(html5QrCode) html5QrCode.stop().catch(()=>{});
 })
-</script>
+</script>{% endif %}
 {% endblock %}
