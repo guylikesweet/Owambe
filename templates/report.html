@@ -29,6 +29,31 @@
       <button type="submit">Save commission rate</button>
     </form>
   </div>
+  <div class="card"><span class="eyebrow">CAPACITY</span><h2>Maximum tickets</h2><p class="muted small">Overall cap on pre-sold tickets (Regular + table categories). Sellers see remaining slots and can't sell past this. Leave blank or 0 for no cap. Walk-in tables never count toward this.</p>
+    <form method="post" action="{{ url_for('update_max_tickets') }}" class="pricing-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="pricing-row">
+        <label for="max_tickets">Max tickets (blank = no cap)</label>
+        <input type="number" min="0" id="max_tickets" name="max_tickets" value="{{ max_tickets if max_tickets is not none else '' }}" placeholder="No cap">
+      </div>
+      <button type="submit">Save ticket cap</button>
+    </form>
+  </div>
+  <div class="card"><span class="eyebrow">WALK-IN PRICING</span><h2>Walk-in table prices</h2><p class="muted small">Separate from the pre-sold ticket prices above — used only when recording a walk-in table for guests already at the event.</p>
+    <form method="post" action="{{ url_for('update_walkin_price') }}" class="pricing-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% for label, slug in walkin_categories.items() %}
+      <div class="pricing-row">
+        <label for="walkin_price_{{ slug }}">{{ label }}</label>
+        <input type="number" min="0" id="walkin_price_{{ slug }}" name="walkin_price_{{ slug }}" value="{{ walkin_prices[label] }}" required>
+      </div>
+      {% endfor %}
+      <button type="submit">Save walk-in prices</button>
+    </form>
+  </div>
+  <div class="card"><span class="eyebrow">TABLES</span><h2>Table tools</h2><p class="muted small">Record a walk-in table, or see every table and its guests.</p>
+    <div class="stack-actions"><a href="{{ url_for('create_table') }}" class="btn">+ Walk-in Table</a><a href="{{ url_for('tables') }}" class="btn secondary">All Tables</a></div>
+  </div>
   {% endif %}
 </div>
 
