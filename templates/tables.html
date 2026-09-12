@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}All Tables · {{ event_name }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><span class="eyebrow">TABLE OVERVIEW</span><h1>All tables</h1><p>Every table — pre-sold, upgraded, or walk-in — with its guest list.</p></div>
+  <div style="display:flex; gap:8px;">
+    <a href="{{ url_for('upgrade_ticket') }}" class="btn secondary">Upgrade Tickets</a>
+    {% if user.role == 'admin' %}<a href="{{ url_for('create_table') }}" class="btn">+ Walk-in Table</a>{% endif %}
+  </div>
+</div>
+
+<p class="muted small">{{ all_tables|length }} table{{ 's' if all_tables|length != 1 else '' }} total.</p>
+
+<div class="ticket-list">
+{% for t in all_tables %}
+  <div class="card" style="margin-bottom:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+      <div>
+        <span class="eyebrow">{{ t.table_ref }}</span>
+        <h2 style="margin:4px 0;">{{ t.category }}
+          {% if t.source == 'walkin' %}<span class="badge used">Walk-in</span>{% else %}<span class="badge valid">Ticket</span>{% endif %}
+        </h2>
+        <p class="muted small">Recorded by {{ t.sold_by or 'Unknown / removed' }} · {{ t.created_at }} WAT</p>
+      </div>
+      <div style="text-align:right;">
+        <span class="stat-value">₦{{ "{:,}".format(t.amount_total) }}</span>
+        <div class="muted small">total</div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <thead><tr><th>Guest</th>{% if t.source == 'ticket' %}<th>WhatsApp</th><th>Ticket Code</th><th>Status</th>{% endif %}</tr></thead>
+        <tbody>
+        {% for guest in t.guests %}
+          <tr>
+            <td data-label="Guest">{{ guest.name }}</td>
+            {% if t.source == 'ticket' %}
+            <td data-label="WhatsApp">{{ guest.whatsapp }}</td>
+            <td data-label="Ticket Code"><strong>{{ guest.ticket_code }}</strong></td>
+            <td data-label="Status">{% if guest.used %}<span class="badge used">Checked In</span>{% else %}<span class="badge valid">Not Yet</span>{% endif %}</td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="empty-state">No tables recorded yet — sell a table ticket, upgrade some regular tickets, or record a walk-in table.</div>
+{% endfor %}
+</div>
+{% endblock %}
