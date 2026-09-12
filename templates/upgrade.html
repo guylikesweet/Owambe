@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Upgrade Tickets · {{ event_name }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><span class="eyebrow">UPGRADE</span><h1>Upgrade tickets to a table</h1><p>Search for the guests' existing tickets, select exactly as many as the table needs, then collect the balance shown.</p></div>
+  <a href="{{ url_for('tables') }}" class="btn secondary">All Tables</a>
+</div>
+
+<form method="get" class="search-bar">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search name, WhatsApp, or ticket code">
+  <button type="submit">Search</button>
+</form>
+
+{% if q %}
+<div class="table-wrap" style="margin-top:16px;">
+  <table id="candidates-table">
+    <thead><tr><th></th><th>Ticket Code</th><th>Name</th><th>WhatsApp</th><th>Category</th><th>Amount Paid</th></tr></thead>
+    <tbody>
+    {% for t in candidates %}
+      <tr>
+        <td data-label=""><input type="checkbox" class="ticket-pick" value="{{ t.id }}" data-amount="{{ t.amount_paid }}" form="upgrade-form" name="ticket_ids"></td>
+        <td data-label="Ticket Code"><strong>{{ t.ticket_code }}</strong></td>
+        <td data-label="Name">{{ t.name }}</td>
+        <td data-label="WhatsApp">{{ t.whatsapp }}</td>
+        <td data-label="Category">{{ t.category or 'Regular' }}</td>
+        <td data-label="Amount Paid">₦{{ "{:,}".format(t.amount_paid) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty-cell">No eligible tickets match (must not be cancelled or already on a table).</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card form-card" style="margin-top:16px;">
+  <span class="eyebrow">UPGRADE TO</span>
+  <h2>Choose the table category</h2>
+  <form id="upgrade-form" method="post" onsubmit="return confirmUpgrade();">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="category">Table Category</label>
+    <select id="category" name="category">
+      {% for label in categories.keys() %}
+      <option value="{{ label }}">{{ label }} (needs {{ category_seats[label] }} tickets) — ₦{{ "{:,}".format(prices[label]) }} per seat</option>
+      {% endfor %}
+    </select>
+    <p class="muted small" id="selection-summary">Select tickets from the search results above.</p>
+    <button type="submit">Upgrade Selected Tickets</button>
+  </form>
+</div>
+
+<script>
+const CATEGORY_SEATS = {{ category_seats | tojson }};
+const PRICES = {{ prices | tojson }};
+const categorySelect = document.getElementById('category');
+const summary = document.getElementById('selection-summary');
+
+function money(n) {
+  return '₦' + Number(n).toLocaleString('en-NG');
+}
+
+function updateSummary() {
+  const category = categorySelect.value;
+  const seatsNeeded = CATEGORY_SEATS[category] || 0;
+  const checked = Array.from(document.querySelectorAll('.ticket-pick:checked'));
+  const alreadyPaid = checked.reduce((sum, cb) => sum + Number(cb.dataset.amount || 0), 0);
+  const targetTotal = (PRICES[category] || 0) * seatsNeeded;
+  const balance = Math.max(targetTotal - alreadyPaid, 0);
+
+  if (checked.length === 0) {
+    summary.textContent = `${category} needs ${seatsNeeded} tickets selected.`;
+  } else if (checked.length !== seatsNeeded) {
+    summary.textContent = `${category} needs exactly ${seatsNeeded} tickets — you have ${checked.length} selected.`;
+  } else {
+    summary.textContent = `${checked.length} tickets selected, already paid ${money(alreadyPaid)} of ${money(targetTotal)} — balance to collect: ${money(balance)}.`;
+  }
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.classList.contains('ticket-pick') || e.target.id === 'category') {
+    updateSummary();
+  }
+});
+updateSummary();
+
+function confirmUpgrade() {
+  const checked = document.querySelectorAll('.ticket-pick:checked').length;
+  const seatsNeeded = CATEGORY_SEATS[categorySelect.value] || 0;
+  if (checked !== seatsNeeded) {
+    alert(`Please select exactly ${seatsNeeded} tickets for ${categorySelect.value}.`);
+    return false;
+  }
+  return confirm('Confirm this upgrade? This cannot be undone from this page.');
+}
+</script>
+{% endblock %}
