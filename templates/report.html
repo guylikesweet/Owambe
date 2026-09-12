@@ -18,10 +18,22 @@
     </form>
   </div>
   <div class="card"><span class="eyebrow">SELLERS</span><h2>Seller access</h2><p class="muted small">Removing a seller keeps their username and ticket records but blocks site access.</p><a href="{{ url_for('register') }}" class="btn">+ Add New Seller</a></div>
+  {% if user.role == 'admin' %}
+  <div class="card"><span class="eyebrow">COMMISSION</span><h2>Seller commission</h2><p class="muted small">Percentage of each ticket's amount paid that counts as the seller's commission. Applies to all sellers; visible to admins only.</p>
+    <form method="post" action="{{ url_for('update_commission') }}" class="pricing-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="pricing-row">
+        <label for="commission_rate">Commission rate (%)</label>
+        <input type="number" min="0" max="100" step="0.1" id="commission_rate" name="commission_rate" value="{{ commission_rate }}" required>
+      </div>
+      <button type="submit">Save commission rate</button>
+    </form>
+  </div>
+  {% endif %}
 </div>
 
-<section class="admin-section"><div class="toolbar"><div><span class="eyebrow">SALES BREAKDOWN</span><h2>By seller</h2></div><a href="{{ url_for('export_csv') }}">Export CSV</a></div><div class="table-wrap"><table><thead><tr><th>Seller</th><th>Access</th><th>Sold</th><th>Checked In</th><th>Cash</th><th>Action</th></tr></thead><tbody>
-{% for s in sales %}<tr><td data-label="Seller"><strong>{{ s.username }}</strong></td><td data-label="Access">{% if s.active %}<span class="badge valid">Active</span>{% else %}<span class="badge used">Previously available</span>{% endif %}</td><td data-label="Sold">{{ s.tickets_sold }}</td><td data-label="Checked In">{{ s.tickets_used }}</td><td data-label="Cash">₦{{ "{:,}".format(s.total_cash) }}</td><td data-label="Action">{% if s.role == 'seller' and s.active %}<form method="post" action="{{ url_for('remove_seller', user_id=s.id) }}" onsubmit="return confirm('Remove this seller? Their records will remain.');">
+<section class="admin-section"><div class="toolbar"><div><span class="eyebrow">SALES BREAKDOWN</span><h2>By seller</h2></div><a href="{{ url_for('export_csv') }}">Export CSV</a></div><div class="table-wrap"><table><thead><tr><th>Seller</th><th>Access</th><th>Sold</th><th>Checked In</th><th>Cash</th>{% if user.role == 'admin' %}<th>Commission Earned</th>{% endif %}<th>Action</th></tr></thead><tbody>
+{% for s in sales %}<tr><td data-label="Seller"><strong>{{ s.username }}</strong></td><td data-label="Access">{% if s.active %}<span class="badge valid">Active</span>{% else %}<span class="badge used">Previously available</span>{% endif %}</td><td data-label="Sold">{{ s.tickets_sold }}</td><td data-label="Checked In">{{ s.tickets_used }}</td><td data-label="Cash">₦{{ "{:,}".format(s.total_cash) }}</td>{% if user.role == 'admin' %}<td data-label="Commission Earned">₦{{ "{:,}".format(s.total_commission) }}</td>{% endif %}<td data-label="Action">{% if s.role == 'seller' and s.active %}<form method="post" action="{{ url_for('remove_seller', user_id=s.id) }}" onsubmit="return confirm('Remove this seller? Their records will remain.');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="table-action danger-action" type="submit">Remove</button></form>{% elif s.role == 'seller' %}<form method="post" action="{{ url_for('restore_seller', user_id=s.id) }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="table-action" type="submit">Restore</button></form>{% elif s.role == 'admin' and s.id != 1 and user.id == 1 and s.active %}<form method="post" action="{{ url_for('remove_admin', user_id=s.id) }}" onsubmit="return confirm('Remove this admin?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="table-action danger-action" type="submit">Remove</button></form>{% else %}<span class="muted small">Admin</span>{% endif %}</td></tr>{% endfor %}
