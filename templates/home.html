@@ -16,6 +16,10 @@
   <div class="stat-card"><span class="stat-value">₦{{ "{:,}".format(overall.cash) }}</span><span class="stat-label">Overall cash</span></div>
 </section>
 
+{% if event_date %}
+<div class="event-notice {% if not sales_open %}event-closed{% endif %}"><strong>Event date:</strong> {{ event_date.strftime('%A, %d %B %Y') }}{% if not sales_open %} · <strong>Ticket sales are closed.</strong>{% else %} · Ticket sales remain open until the event date.{% endif %}</div>
+{% endif %}
+
 {% if max_tickets is not none %}
 <p class="muted small" style="margin-top:-8px;">
   {% if remaining_tickets is not none and remaining_tickets <= 0 %}
@@ -33,7 +37,7 @@
 </section>
 
 <nav class="action-grid" aria-label="Ticket desk actions">
-  <a class="action-card primary-action" href="{{ url_for('sell') }}"><span class="action-icon">＋</span><span><strong>Sell a ticket</strong><small>Enter guest details and issue a QR</small></span></a>
+  <a class="action-card primary-action" href="{{ url_for('sell') }}"><span class="action-icon">＋</span><span><strong>{% if sales_open %}Sell a ticket{% else %}Ticket sales closed{% endif %}</strong><small>{% if sales_open %}Enter guest details and issue a QR{% else %}Sales closed for the event date{% endif %}</small></span></a>
   <a class="action-card" href="{{ url_for('scan') }}"><span class="action-icon">⌁</span><span><strong>Scan / check in</strong><small>Validate a QR, ticket code or WhatsApp</small></span></a>
   <a class="action-card" href="{{ url_for('all_tickets') }}"><span class="action-icon">▦</span><span><strong>All tickets</strong><small>Search every ticket and download its QR</small></span></a>
   <a class="action-card" href="{{ url_for('tables') }}"><span class="action-icon">▤</span><span><strong>All tables</strong><small>See every table and who's on it</small></span></a>
