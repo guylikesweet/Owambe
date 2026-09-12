@@ -625,7 +625,46 @@ def all_tickets():
     sql = """SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id WHERE t.name ILIKE %s OR t.whatsapp ILIKE %s OR COALESCE(t.ticket_code,'') ILIKE %s OR t.id::text ILIKE %s OR COALESCE(t.table_id,'') ILIKE %s ORDER BY t.id DESC"""
     like = f"%{q}%"
     tickets = query(sql, (like, like, like, like, like)).fetchall()
-    return render_template("tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user)
+
+    # Category breakdown by seller + cumulative totals + tables to prepare.
+    # Always reflects ALL tickets (independent of the search box above),
+    # and excludes cancelled tickets so the venue plan matches tickets that
+    # will actually be used.
+    breakdown_rows = query(
+        """SELECT COALESCE(u.username, 'Unknown / removed') AS username, t.category, COUNT(*) AS cnt
+           FROM tickets t LEFT JOIN users u ON t.sold_by = u.id
+           WHERE t.cancelled = FALSE
+           GROUP BY COALESCE(u.username, 'Unknown / removed'), t.category"""
+    ).fetchall()
+    table_count_rows = query(
+        """SELECT category, COUNT(DISTINCT table_id) AS table_count
+           FROM tickets
+           WHERE table_id IS NOT NULL AND cancelled = FALSE
+           GROUP BY category"""
+    ).fetchall()
+
+    category_labels = list(CATEGORY_SEATS.keys())
+    sellers = sorted({r["username"] for r in breakdown_rows})
+    seller_breakdown = {s: {c: 0 for c in category_labels} for s in sellers}
+    category_totals = {c: 0 for c in category_labels}
+    for r in breakdown_rows:
+        if r["category"] in category_totals:
+            seller_breakdown[r["username"]][r["category"]] = r["cnt"]
+            category_totals[r["category"]] += r["cnt"]
+    seller_totals = {s: sum(seller_breakdown[s].values()) for s in sellers}
+    grand_total = sum(category_totals.values())
+
+    table_counts = {c: 0 for c in category_labels if CATEGORY_SEATS[c] > 1}
+    for r in table_count_rows:
+        if r["category"] in table_counts:
+            table_counts[r["category"]] = r["table_count"]
+
+    return render_template(
+        "tickets.html", tickets=tickets, q=q, event_name=EVENT_NAME, user=g.user,
+        category_labels=category_labels, seller_breakdown=seller_breakdown,
+        seller_totals=seller_totals, category_totals=category_totals,
+        grand_total=grand_total, category_seats=CATEGORY_SEATS, table_counts=table_counts,
+    )
 
 @app.route("/ticket/<int:ticket_id>/pdf")
 @login_required()
@@ -771,6 +810,27 @@ def _ticket_status_payload(ticket):
         "seat": ticket.get("seat"),
         "amount_paid": ticket["amount_paid"],
     }
+
+@app.route("/api/data_version")
+@login_required()
+def api_data_version():
+    """Lightweight signature the client polls to know when to auto-refresh.
+    Changes whenever a ticket is sold/used/cancelled/refunded, a seller/admin
+    is added or (de)activated, or a price/commission setting changes."""
+    t = query(
+        """SELECT COUNT(*) AS cnt, COALESCE(MAX(id),0) AS max_id,
+                  COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used_cnt,
+                  COALESCE(SUM(CASE WHEN cancelled THEN 1 ELSE 0 END),0) AS cancelled_cnt,
+                  COALESCE(SUM(CASE WHEN refunded THEN 1 ELSE 0 END),0) AS refunded_cnt
+           FROM tickets"""
+    ).fetchone()
+    users_row = query(
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(CASE WHEN active THEN 1 ELSE 0 END),0) AS active_cnt FROM users"
+    ).fetchone()
+    settings_rows = query("SELECT key, value FROM app_settings ORDER BY key").fetchall()
+    settings_sig = "|".join(f"{r['key']}={r['value']}" for r in settings_rows)
+    version = f"{t['cnt']}-{t['max_id']}-{t['used_cnt']}-{t['cancelled_cnt']}-{t['refunded_cnt']}-{users_row['cnt']}-{users_row['active_cnt']}-{settings_sig}"
+    return {"version": version}
 
 @app.route("/api/lookup_ticket", methods=["POST"])
 @login_required()
