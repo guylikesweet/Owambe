@@ -115,7 +115,7 @@
             <br>
             <span class="muted small">
               {{ t.seat }} ·
-              <a class="table-id-link" href="{{ url_for('all_tickets', q=t.table_id) }}" title="See everyone on this table">{{ t.table_id }}</a>
+              <a class="table-id-link" href="{{ url_for('all_tickets', q=t.table_id) }}" title="Internal ref: {{ t.table_id }}">Table {{ t.table_number }}</a>
             </span>
           {% endif %}
         </td>
