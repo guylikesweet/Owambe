@@ -17,7 +17,7 @@
 
 <div class="toolbar result-toolbar">
   <span class="muted small">{{ tickets|length }} result{{ 's' if tickets|length != 1 else '' }}</span>
-  <div><a href="{{ url_for('scan') }}">Scanner</a>{% if user.role == 'admin' %} · <a href="{{ url_for('export_csv') }}">Export CSV</a>{% endif %}</div>
+  <div><a href="{{ url_for('tables') }}">All Tables</a> · <a href="{{ url_for('scan') }}">Scanner</a>{% if user.role == 'admin' %} · <a href="{{ url_for('export_csv') }}">Export CSV</a>{% endif %}</div>
 </div>
 
 <style>
@@ -64,7 +64,7 @@
   </div>
 
   <h3 style="margin-top:20px;">Tables to prepare</h3>
-  <p class="muted small">Based on distinct tables sold per category (not raw ticket count) — this is how many physical tables of each size the venue needs.</p>
+  <p class="muted small">Based on distinct tables sold per category, including both pre-sold/upgraded ticket tables and admin-recorded walk-in tables — this is how many physical tables of each size the venue needs. See <a href="{{ url_for('tables') }}">All Tables</a> for the full guest list per table.</p>
   <div class="tables-grid">
     {% for label, count in table_counts.items() %}
     <div class="stat-card compact">
