@@ -26,6 +26,13 @@
 </div>
 {% endif %}
 
+{% if not sales_open %}
+<div class="card sales-closed-card">
+  <span class="eyebrow">SALES CLOSED</span>
+  <h2>Ticket sales have ended</h2>
+  <p class="muted">The event date has arrived{% if event_date %} ({{ event_date.strftime('%A, %d %B %Y') }}){% endif %}. New ticket payments and ticket issuance are disabled. Scanning is now available according to the event scanning settings.</p>
+</div>
+{% else %}
 <div class="card form-card">
   <form id="issue-form" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -44,6 +51,7 @@
     <button type="submit">Review &amp; Issue Ticket<span id="submit-plural">s</span></button>
   </form>
 </div>
+{% endif %}
 
 <section class="recent-section">
   <div class="toolbar"><div><span class="eyebrow">QUICK VIEW</span><h2>Recently sold</h2></div><a href="{{ url_for('all_tickets') }}">View all tickets →</a></div>
@@ -102,7 +110,7 @@
   </div>
 </div>
 
-<script>
+{% if sales_open %}<script>
 // seats per category label, e.g. {"Regular": 1, "Table of 4": 4, ...}
 const CATEGORY_SEATS = {{ categories | tojson }};
 // price per ticket for each category label
@@ -176,10 +184,11 @@ categorySelect.addEventListener('change', renderGuestFields);
 renderGuestFields();
 
 const issueForm = document.getElementById('issue-form');
+if (!issueForm) { /* sales are closed; no issue form is rendered */ }
 const confirmModal = document.getElementById('confirm-modal');
 const reviewGrid = document.getElementById('review-grid');
 
-issueForm.addEventListener('submit', (event) => {
+if (issueForm) issueForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (!issueForm.reportValidity()) return;
 
@@ -240,5 +249,5 @@ document.getElementById('confirm-review').addEventListener('click', () => {
   }
   issueForm.submit();
 });
-</script>
+</script>{% endif %}
 {% endblock %}
