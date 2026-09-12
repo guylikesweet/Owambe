@@ -21,6 +21,63 @@
 </div>
 
 <style>
+  .breakdown-wrap { overflow-x: auto; margin-bottom: 20px; }
+  .breakdown-table { width: 100%; border-collapse: collapse; }
+  .breakdown-table th, .breakdown-table td { padding: 8px 12px; text-align: right; white-space: nowrap; }
+  .breakdown-table th:first-child, .breakdown-table td:first-child { text-align: left; }
+  .breakdown-table tr.breakdown-total-row { font-weight: 700; border-top: 2px solid var(--accent, #D4AF37); }
+  .tables-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+  .tables-grid .stat-card { min-width: 140px; }
+</style>
+
+<section class="admin-section">
+  <div class="toolbar"><div><span class="eyebrow">EVENT PLANNING</span><h2>Category breakdown by handler</h2></div></div>
+  <p class="muted small">Cancelled tickets are excluded, so this reflects tickets that will actually be used at the event.</p>
+  <div class="card breakdown-wrap">
+    <table class="breakdown-table">
+      <thead>
+        <tr>
+          <th>Seller</th>
+          {% for label in category_labels %}<th>{{ label }}</th>{% endfor %}
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for seller, counts in seller_breakdown.items() %}
+        <tr>
+          <td><strong>{{ seller }}</strong></td>
+          {% for label in category_labels %}<td>{{ counts[label] }}</td>{% endfor %}
+          <td><strong>{{ seller_totals[seller] }}</strong></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ category_labels|length + 2 }}" class="empty-cell">No tickets sold yet.</td></tr>
+        {% endfor %}
+        {% if seller_breakdown %}
+        <tr class="breakdown-total-row">
+          <td>All sellers (cumulative)</td>
+          {% for label in category_labels %}<td>{{ category_totals[label] }}</td>{% endfor %}
+          <td>{{ grand_total }}</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:20px;">Tables to prepare</h3>
+  <p class="muted small">Based on distinct tables sold per category (not raw ticket count) — this is how many physical tables of each size the venue needs.</p>
+  <div class="tables-grid">
+    {% for label, count in table_counts.items() %}
+    <div class="stat-card compact">
+      <span class="stat-value">{{ count }}</span>
+      <span class="stat-label">{{ label }} table{{ 's' if count != 1 else '' }} ({{ count * category_seats[label] }} guests)</span>
+    </div>
+    {% else %}
+    <p class="muted small">No table-category tickets sold yet.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<style>
   /* Visually group consecutive rows that share a table_id, so a table's
      guests are obvious at a glance without changing the table structure. */
   tr.table-grouped td {
