@@ -389,8 +389,14 @@ def original_admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         user = current_user()
-        if not user or not user["active"] or user["role"]!= "admin":
-            session.clear() if not user or not user["active"] else None
+        if not user or not user["active"]:
+            # Only clear the session for a user who WAS logged in but is now
+            # inactive. For a plain anonymous visitor (e.g. an expired session
+            # or a background poll from a page that isn't logged in), clearing
+            # here would also wipe the CSRF token embedded in whatever page
+            # they're currently looking at, breaking their next form submit.
+            if user and not user["active"]:
+                session.clear()
             flash("Only the original administrator can access this feature.", "error")
             return redirect(url_for("home"))
         original = query("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
@@ -407,8 +413,15 @@ def login_required(role=None):
         def wrapper(*args, **kwargs):
             user = current_user()
             if not user or not user["active"]:
-                session.clear()
+                # Only clear the session for a user who WAS logged in but is now
+                # inactive. For a plain anonymous visitor (e.g. the login page's
+                # background auto-refresh poll, which runs unauthenticated),
+                # clearing the session here would also wipe the CSRF token
+                # embedded in the login form they're currently looking at,
+                # causing "Invalid or missing CSRF token" on their next submit
+                # even though they did nothing wrong.
                 if user and not user["active"]:
+                    session.clear()
                     flash("This seller account has been removed. Please contact an administrator.", "error")
                 return redirect(url_for("login"))
             if role and user["role"]!= role:
