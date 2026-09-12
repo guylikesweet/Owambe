@@ -16,11 +16,11 @@
   <div class="card" style="margin-bottom:16px;">
     <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
       <div>
-        <span class="eyebrow">{{ t.table_ref }}</span>
+        <span class="eyebrow">TABLE {{ t.table_number }}</span>
         <h2 style="margin:4px 0;">{{ t.category }}
           {% if t.source == 'walkin' %}<span class="badge used">Walk-in</span>{% else %}<span class="badge valid">Ticket</span>{% endif %}
         </h2>
-        <p class="muted small">Recorded by {{ t.sold_by or 'Unknown / removed' }} · {{ t.created_at }} WAT</p>
+        <p class="muted small">Recorded by {{ t.sold_by or 'Unknown / removed' }} · {{ t.created_at }} WAT · <span title="Internal reference">{{ t.table_ref }}</span></p>
       </div>
       <div style="text-align:right;">
         <span class="stat-value">₦{{ "{:,}".format(t.amount_total) }}</span>
