@@ -540,20 +540,28 @@ def reset_tickets():
 def report():
     prices = get_ticket_prices()
     commission_rate = get_commission_rate()
-    sales = query("""SELECT u.id, u.username, u.role, u.active, COUNT(t.id) AS tickets_sold, COALESCE(SUM(t.amount_paid - COALESCE(t.refund_amount,0)),0) AS total_cash, COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used, COALESCE(SUM(t.amount_paid),0) AS total_gross FROM users u LEFT JOIN tickets t ON u.id = t.sold_by GROUP BY u.id ORDER BY u.role, u.active DESC, u.username""").fetchall()
-    # Commission = commission_rate% of each seller's total amount_paid (gross, before refunds).
+    # "sold"/"cash"/"gross" all exclude cancelled tickets consistently, so
+    # these numbers match the category breakdown on the All Tickets page.
+    sales = query("""SELECT u.id, u.username, u.role, u.active,
+                             COUNT(CASE WHEN t.cancelled = FALSE THEN 1 END) AS tickets_sold,
+                             COALESCE(SUM(CASE WHEN t.cancelled = FALSE THEN t.amount_paid - COALESCE(t.refund_amount,0) ELSE 0 END),0) AS total_cash,
+                             COALESCE(SUM(CASE WHEN t.used THEN 1 ELSE 0 END),0) AS tickets_used,
+                             COALESCE(SUM(CASE WHEN t.cancelled = FALSE THEN t.amount_paid ELSE 0 END),0) AS total_gross
+                      FROM users u LEFT JOIN tickets t ON u.id = t.sold_by
+                      GROUP BY u.id ORDER BY u.role, u.active DESC, u.username""").fetchall()
+    # Commission = commission_rate% of each seller's total amount_paid (gross, before refunds, excluding cancelled).
     for s in sales:
         s["total_commission"] = round(s["total_gross"] * commission_rate / 100)
     users = query("SELECT id, username, role, active FROM users ORDER BY role, active DESC, username").fetchall()
-    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
+    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE""").fetchone()
     return render_template("report.html", sales=sales, users=users, overall=overall, prices=prices, categories=CATEGORY_SLUGS, event_name=EVENT_NAME, user=g.user, commission_rate=commission_rate)
 
 @app.route("/")
 @login_required()
 def home():
     user = g.user
-    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
-    mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE sold_by = %s""", (user["id"],)).fetchone()
+    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE""").fetchone()
+    mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE AND sold_by = %s""", (user["id"],)).fetchone()
     return render_template("home.html", overall=overall, mine=mine, event_name=EVENT_NAME, user=user, ticket_price=get_ticket_price())
 
 @app.route("/sell", methods=["GET", "POST"])
@@ -608,8 +616,8 @@ def sell():
         db.commit()
         return redirect(url_for("ticket_issued", ticket_id=first_id))
 
-    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets""").fetchone()
-    mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE sold_by = %s""", (user["id"],)).fetchone()
+    overall = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE""").fetchone()
+    mine = query("""SELECT COUNT(*) AS sold, COALESCE(SUM(CASE WHEN used THEN 1 ELSE 0 END),0) AS used, COALESCE(SUM(amount_paid - COALESCE(refund_amount,0)),0) AS cash FROM tickets WHERE cancelled = FALSE AND sold_by = %s""", (user["id"],)).fetchone()
     recent = query("""SELECT t.*, u.username FROM tickets t LEFT JOIN users u ON t.sold_by = u.id ORDER BY t.id DESC LIMIT 2""").fetchall()
     return render_template(
         "sell.html",
