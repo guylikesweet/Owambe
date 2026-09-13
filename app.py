@@ -599,18 +599,26 @@ def restore_seller(user_id):
 @app.route("/admin/clear_removed_sellers", methods=["POST"])
 @original_admin_required
 def clear_removed_sellers():
+    """Covers removed sellers AND removed admins (the original admin can
+    never be inactive in the first place, since remove_admin blocks
+    removing that specific account — so it's never at risk here). Every FK
+    that points at users.id (tickets.sold_by/cancelled_by/refunded_by,
+    ticket_audit.performed_by, walkin_tables.created_by) is already defined
+    ON DELETE SET NULL at the schema level, so those records survive
+    automatically without needing to null anything out manually first."""
     confirmation = request.form.get("confirmation", "").strip().upper()
-    if confirmation != "CLEAR SELLERS":
-        flash("Removed sellers were not cleared. Type CLEAR SELLERS to confirm.", "error")
+    if confirmation != "CLEAR USERS":
+        flash("Removed accounts were not cleared. Type CLEAR USERS to confirm.", "error")
         return redirect(url_for("report"))
 
-    rows = query("SELECT username FROM users WHERE role = 'seller' AND active = FALSE").fetchall()
-    query("DELETE FROM users WHERE role = 'seller' AND active = FALSE")
+    rows = query("SELECT username, role FROM users WHERE active = FALSE").fetchall()
+    query("DELETE FROM users WHERE active = FALSE")
     get_db().commit()
     if rows:
-        flash(f"{len(rows)} removed seller account(s) were permanently cleared. Their ticket and audit records remain.", "success")
+        names = ", ".join(f"{r['username']} ({r['role']})" for r in rows)
+        flash(f"{len(rows)} removed account(s) were permanently cleared: {names}. Their ticket and audit records remain.", "success")
     else:
-        flash("There are no removed seller accounts to clear.", "success")
+        flash("There are no removed accounts to clear.", "success")
     return redirect(url_for("report"))
 
 @app.route("/admin/event_settings", methods=["POST"])
