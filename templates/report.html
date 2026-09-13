@@ -74,8 +74,8 @@
 </tbody></table></div></section>
 
 
-<section class="admin-section"><div class="card danger-zone"><span class="eyebrow">SELLER CLEANUP</span><h2>Clear removed sellers</h2><p class="muted small">Permanently removes seller accounts that were already marked as removed. Their ticket, sales and audit records stay in the database; the seller account itself is deleted.</p><form method="post" action="{{ url_for('clear_removed_sellers') }}" class="reset-form">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="text" name="confirmation" placeholder="Type CLEAR SELLERS" autocomplete="off" required><button type="submit" class="danger-button">Clear removed sellers</button></form></div></section>
+<section class="admin-section"><div class="card danger-zone"><span class="eyebrow">ACCOUNT CLEANUP</span><h2>Clear removed accounts</h2><p class="muted small">Permanently removes seller AND admin accounts that were already marked as removed. Their ticket, sales and audit records stay in the database; the account itself is deleted.</p><form method="post" action="{{ url_for('clear_removed_sellers') }}" class="reset-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="text" name="confirmation" placeholder="Type CLEAR USERS" autocomplete="off" required><button type="submit" class="danger-button">Clear removed accounts</button></form></div></section>
 <section class="admin-section"><div class="card danger-zone"><span class="eyebrow">DEVELOPER / FAILSAFE</span><h2>Clear ticket history</h2><p class="muted small">This deletes all tickets and check-in history, resetting ticketing to zero. Users and seller accounts are not deleted.</p><form method="post" action="{{ url_for('reset_tickets') }}" class="reset-form">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="text" name="confirmation" placeholder="Type RESET" autocomplete="off" required><button type="submit" class="danger-button">Clear all ticket history</button></form></div></section>
 {% endblock %}
