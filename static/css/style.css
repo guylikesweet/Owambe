@@ -272,6 +272,19 @@ td strong { color:var(--cyan); }
   td { display:flex; justify-content:space-between; gap:15px; border:0; padding:5px 0; white-space:normal; }
   td::before { content:attr(data-label); color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
  .table-wrap { overflow:visible; }
+
+  /* FIX: the generic collapse-to-block rule above was also hiding the
+     Category Breakdown table's header row, and its cells have no
+     data-label attributes to fall back on — so values showed with no
+     visible column name on mobile. That table already has its own
+     horizontal-scroll wrapper (.breakdown-wrap), so give it real table
+     layout instead of collapsing it. */
+  .breakdown-wrap table { display:table; }
+  .breakdown-wrap thead { display:table-header-group; }
+  .breakdown-wrap tbody { display:table-row-group; }
+  .breakdown-wrap tr { display:table-row; padding:0; border-bottom:0; }
+  .breakdown-wrap th,.breakdown-wrap td { display:table-cell; padding:8px 12px; white-space:nowrap; }
+  .breakdown-wrap td::before { content:none; }
   }
 
 /* Scanner 2s Loader */
@@ -439,4 +452,4 @@ td strong { color:var(--cyan); }
   .breakdown-table td { display:flex; justify-content:space-between; gap:12px; padding:4px 2px; white-space:normal; text-align:right !important; }
   .breakdown-table td::before { content:attr(data-label); color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.5px; text-align:left; }
   .breakdown-wrap { overflow:visible; }
-}
+                }
